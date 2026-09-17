@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=1920, height=1080, user-scalable=no">
+    <title>AmorecoFlix</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+    <!-- ================= TELA INICIAL ================= -->
+    <div id="home-screen" class="screen active">
+
+        <header class="app-header">
+            <h1 class="app-title">Amoreco<span class="app-title-flix">Flix</span></h1>
+            <div id="usb-status" class="usb-status">Procurando dispositivos USB...</div>
+        </header>
+
+        <!-- ---- CONTINUAR ASSISTINDO ---- -->
+        <section id="continue-section" class="rail hidden">
+            <h2 class="rail-title">Continuar assistindo</h2>
+            <div id="continue-list" class="rail-track" data-nav-group="continue">
+                <!-- cards injetados por app.js -->
+            </div>
+        </section>
+
+        <!-- ---- NAVEGACAO DE ARQUIVOS ---- -->
+        <section id="browser-section" class="browser">
+            <div class="browser-topbar">
+                <h2 class="rail-title">Navegacao de arquivos</h2>
+                <nav id="breadcrumb" class="breadcrumb" aria-label="Caminho atual"></nav>
+            </div>
+
+            <ul id="file-list" class="file-list" data-nav-group="files">
+                <li class="file-row empty">Nenhum dispositivo montado.</li>
+            </ul>
+        </section>
+
+        <footer class="hint-bar">
+            <span class="hint"><b class="key key-ok">OK</b>abrir</span>
+            <span class="hint"><b class="key key-ok">OK</b>segurar: opcoes</span>
+            <span class="hint"><b class="key key-return">RETURN</b>voltar</span>
+            <span id="refresh-hint" class="hint"><b class="key key-red">VERMELHO</b>reescanear &bull; <b class="key key-blue">AZUL</b>status da rede &bull; <b class="key key-green">VERDE</b>debug</span>
+        </footer>
+    </div>
+
+    <!-- Status/progresso de recebimento de arquivo pela rede (nao-modal,
+         nao rouba foco - a TV conecta sozinha no PC em segundo plano) -->
+    <div id="net-upload" class="net-upload" hidden>
+        <div id="net-upload-status" class="net-upload-status">Aguardando conexao do PC...</div>
+        <div class="net-upload-track">
+            <div id="net-upload-fill" class="net-upload-fill"></div>
+        </div>
+        <div id="net-upload-pct" class="net-upload-pct"></div>
+    </div>
+
+    <!-- ================= PLAYER ================= -->
+    <div id="player-screen" class="screen">
+        <!-- Plano de video do AVPlay (Tizen renderiza o video atras do DOM) -->
+        <object type="application/avplayer" id="av-player"></object>
+
+        <!-- Fallback HTML5 (emulador / quando AVPlay indisponivel) -->
+        <video id="html5-player" class="hidden" preload="auto"></video>
+
+        <!-- indicador central play/pause (fora da HUD p/ nao esmaecer junto) -->
+        <div id="p-center" class="p-center" hidden>
+            <svg id="p-center-svg" viewBox="0 0 24 24" width="60" height="60" aria-hidden="true"></svg>
+        </div>
+
+        <div id="player-ui" class="player-ui">
+            <div class="p-top">
+                <div class="p-titlebox">
+                    <div class="p-crumb" id="now-sub"></div>
+                    <h2 id="now-playing" class="p-title"></h2>
+                </div>
+                <button id="p-gear" class="p-gear focusable" aria-label="Audio e legendas"></button>
+            </div>
+
+            <div class="p-bottom">
+                <div class="p-scrub" id="p-scrub">
+                    <div class="p-scrub-track">
+                        <div class="p-scrub-buf" id="p-buf"></div>
+                        <div class="p-scrub-fill" id="progress-fill"></div>
+                    </div>
+                    <div class="p-scrub-knob" id="p-knob">
+                        <span class="p-scrub-preview" id="p-preview"></span>
+                    </div>
+                </div>
+                <div class="p-times">
+                    <span id="time-current">0:00</span>
+                    <span id="time-total">0:00</span>
+                </div>
+
+                <div class="p-controls" data-nav-group="player">
+                    <button id="btn-rewind"   class="p-ic focusable" aria-label="Voltar 10 segundos"></button>
+                    <button id="btn-playpause" class="p-ic p-ic-lg focusable" aria-label="Pausar"></button>
+                    <button id="btn-forward"  class="p-ic focusable" aria-label="Avancar 10 segundos"></button>
+                    <button id="btn-next"     class="p-ic focusable" aria-label="Proximo episodio"></button>
+                    <button id="btn-stop"     class="p-ic focusable" aria-label="Parar"></button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Painel de audio e legendas -->
+        <div id="p-settings" class="p-settings" hidden>
+            <div class="p-settings-in" data-nav-group="settings">
+                <h3 class="p-settings-h">Audio</h3>
+                <div id="set-audio" class="p-set-list"></div>
+                <h3 class="p-settings-h">Legendas</h3>
+                <div id="set-text" class="p-set-list"></div>
+            </div>
+        </div>
+
+        <!-- Botao pular abertura / encerramento -->
+        <button id="skip-btn" class="skip-btn" hidden></button>
+
+        <!-- Aviso de fim de video / proximo episodio -->
+        <div id="next-toast" class="next-toast hidden">
+            <p>Reproduzindo a seguir</p>
+            <strong id="next-toast-name"></strong>
+            <div class="next-toast-actions" data-nav-group="toast">
+                <button id="btn-toast-play" class="pc-btn focusable">Assistir agora</button>
+                <button id="btn-toast-cancel" class="pc-btn focusable">Cancelar</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="spinner" class="spinner hidden"><div class="spinner-dot"></div></div>
+
+    <!-- Menu de contexto (segurar OK num item de "Continuar assistindo") -->
+    <div id="ctx-menu" class="ctx-menu" hidden>
+        <div id="ctx-title" class="ctx-title"></div>
+        <div class="ctx-actions" data-nav-group="ctx">
+            <button id="ctx-play"   class="pc-btn focusable">Assistir</button>
+            <button id="ctx-remove" class="pc-btn focusable">Remover da lista</button>
+            <button id="ctx-cancel" class="pc-btn focusable">Cancelar</button>
+        </div>
+    </div>
+
+    <!-- Console de debug na tela (tecla VERDE) -->
+    <pre id="dbg" class="dbg" hidden></pre>
+
+    <!-- Samsung Product API (AVPlay, tvinputdevice, etc.) -->
+    <script src="$WEBAPIS/webapis/webapis.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,14 @@
+# artefatos de build (gerados pelo build.ps1)
+.buildResult/
+*.wgt
+
+# certificados / assinaturas (nunca commitar)
+*.p12
+*.pfx
+*.pem
+*.key
+author-signature.xml
+signature*.xml
+
+# locks/estado local
+.claude/scheduled_tasks.lock
