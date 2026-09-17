@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Calendario de Lancamentos</title>
+<style>
+    :root {
+        --bg:        #141414;
+        --bg-panel:  #1c1c1c;
+        --text:      #ffffff;
+        --text-2:    #d6d6d6;
+        --text-dim:  #8c8c8c;
+        --accent:    #e50914;
+        --ok:        #23a55a;
+        --soon:      #d99a1f;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+        background: var(--bg);
+        color: var(--text);
+        font-family: "Segoe UI", Arial, sans-serif;
+        min-height: 100%;
+    }
+    body {
+        background:
+            radial-gradient(1200px 400px at 20% -5%, rgba(60,10,14,0.55), transparent 70%),
+            var(--bg);
+        padding-bottom: 60px;
+    }
+
+    header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        flex-wrap: wrap;
+        gap: 12px;
+        padding: 34px 50px 10px;
+    }
+    h1 { font-size: 32px; font-weight: 800; letter-spacing: -0.5px; }
+    h1 span { color: var(--accent); }
+    .week-range { color: var(--text-dim); font-size: 15px; margin-top: 4px; }
+
+    .status-box { display: flex; align-items: center; gap: 14px; }
+    #status { color: var(--text-dim); font-size: 14px; }
+    #refresh-btn {
+        background: var(--accent);
+        color: #fff;
+        border: none;
+        border-radius: 5px;
+        padding: 9px 18px;
+        font-size: 14px;
+        font-weight: 600;
+        cursor: pointer;
+    }
+    #refresh-btn:hover { background: #ff2d38; }
+    #refresh-btn:disabled { opacity: 0.5; cursor: default; }
+
+    .empty {
+        margin: 60px 50px;
+        color: var(--text-dim);
+        font-size: 18px;
+        line-height: 1.6;
+    }
+    .empty code {
+        background: var(--bg-panel);
+        padding: 2px 7px;
+        border-radius: 4px;
+        color: var(--text-2);
+    }
+
+    .provider { padding: 10px 0 6px; }
+    .provider h2 {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-size: 20px;
+        font-weight: 700;
+        color: var(--text-2);
+        margin: 0 0 14px 50px;
+    }
+    .provider h2 img { height: 22px; border-radius: 4px; }
+
+    .track {
+        display: flex;
+        gap: 16px;
+        overflow-x: auto;
+        padding: 4px 50px 22px;
+        scroll-behavior: smooth;
+    }
+    .track::-webkit-scrollbar { height: 6px; }
+    .track::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
+
+    .card {
+        flex: 0 0 200px;
+        text-decoration: none;
+        color: inherit;
+        cursor: pointer;
+        transition: transform 0.15s ease;
+    }
+    .card:hover { transform: scale(1.04); }
+    .art {
+        position: relative;
+        width: 100%;
+        padding-top: 150%;
+        border-radius: 6px;
+        overflow: hidden;
+        background: linear-gradient(150deg, #2a3a4a, #161b22);
+        box-shadow: 0 10px 24px rgba(0,0,0,0.5);
+    }
+    .art img {
+        position: absolute; inset: 0;
+        width: 100%; height: 100%;
+        object-fit: cover;
+        opacity: 0;
+        transition: opacity 0.25s ease;
+    }
+    .art img.loaded { opacity: 1; }
+    .day-pill {
+        position: absolute; top: 8px; left: 8px;
+        background: rgba(0,0,0,0.82);
+        color: #fff;
+        font-size: 12px; font-weight: 700;
+        padding: 3px 8px;
+        border-radius: 4px;
+    }
+    .status-pill {
+        position: absolute; bottom: 8px; right: 8px;
+        color: #fff;
+        font-size: 12px; font-weight: 700;
+        padding: 3px 8px;
+        border-radius: 4px;
+    }
+    .status-pill.soon     { background: var(--soon); }
+    .status-pill.released { background: var(--ok); }
+
+    .card-title {
+        margin-top: 9px;
+        font-size: 14px; font-weight: 600;
+        color: var(--text-2);
+        line-height: 1.3;
+        display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+        overflow: hidden;
+    }
+    .card-sub { font-size: 12px; color: var(--text-dim); margin-top: 2px; }
+</style>
+</head>
+<body>
+
+<header>
+    <div>
+        <h1>Calendario de <span>Lancamentos</span></h1>
+        <div class="week-range" id="week-range"></div>
+    </div>
+    <div class="status-box">
+        <span id="status">Carregando...</span>
+        <button id="refresh-btn">Atualizar agora</button>
+    </div>
+</header>
+
+<div id="body"></div>
+
+<script src="calendario-data.js"></script>
+<script>
+'use strict';
+
+var WD = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sab'];
+var MESES = ['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'];
+var CACHE_KEY = 'calendarLiveCache_v1';
+
+var els = {
+    body: document.getElementById('body'),
+    status: document.getElementById('status'),
+    weekRange: document.getElementById('week-range'),
+    refreshBtn: document.getElementById('refresh-btn')
+};
+
+function parseDate(s) {
+    var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s || '');
+    return m ? new Date(+m[1], +m[2] - 1, +m[3]) : null;
+}
+function fmtDate(d) { return d.getDate() + ' ' + MESES[d.getMonth()]; }
+
+/* segunda a domingo da semana de "d" */
+function weekRange(d) {
+    var day = d.getDay();
+    var diffToMon = (day === 0) ? -6 : 1 - day;
+    var mon = new Date(d.getFullYear(), d.getMonth(), d.getDate() + diffToMon);
+    var sun = new Date(mon.getFullYear(), mon.getMonth(), mon.getDate() + 6, 23, 59, 59);
+    return { start: mon, end: sun };
+}
+
+function escapeHtml(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+        return { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c];
+    });
+}
+
+/* --------- busca ao vivo na TMDB pelos ids ja resolvidos pelo script --------- */
+function fetchLive(shows, apiKey, cb) {
+    var queue = shows.filter(function (s) { return s.tmdb_id; }).slice();
+    if (!apiKey || !queue.length) { cb(); return; }
+    var MAX = 4, active = 0, finished = false;
+    function settle() { if (!finished) { finished = true; cb(); } }
+    function toEp(ep) {
+        return ep ? {
+            season_number: ep.season_number, episode_number: ep.episode_number,
+            name: ep.name, air_date: ep.air_date
+        } : null;
+    }
+    function pump() {
+        if (!queue.length) { if (active === 0) { settle(); } return; }
+        var show = queue.shift();
+        active++;
+        var url = 'https://api.themoviedb.org/3/tv/' + show.tmdb_id +
+                  '?api_key=' + apiKey + '&language=pt-BR';
+        fetch(url).then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (j) {
+                if (!j) { return; }
+                show.status = j.status || show.status;
+                show.name   = j.name || show.name;
+                show.poster_path = j.poster_path || show.poster_path;
+                show.next_episode = toEp(j.next_episode_to_air);
+                show.last_episode = toEp(j.last_episode_to_air) || show.last_episode;
+            })
+            .catch(function () {})
+            .then(function () { active--; pump(); });
+    }
+    for (var i = 0; i < MAX; i++) { pump(); }
+}
+
+function loadCache() {
+    try { return JSON.parse(localStorage.getItem(CACHE_KEY)) || null; } catch (e) { return null; }
+}
+function saveCache(shows) {
+    try { localStorage.setItem(CACHE_KEY, JSON.stringify({ savedAt: Date.now(), shows: shows })); } catch (e) {}
+}
+
+/* agrupa por streaming os episodios (previstos ou lancados) da semana atual */
+function groupByProvider(shows) {
+    var now = new Date();
+    var wk = weekRange(now);
+    var groups = {};
+    shows.forEach(function (show) {
+        var eps = [], seen = {};
+        [show.next_episode, show.last_episode].forEach(function (ep) {
+            if (!ep) { return; }
+            var k = ep.season_number + 'x' + ep.episode_number;
+            if (seen[k]) { return; }
+            seen[k] = true;
+            eps.push(ep);
+        });
+        eps.forEach(function (ep) {
+            var d = parseDate(ep.air_date);
+            if (!d || d < wk.start || d > wk.end) { return; }
+            var provs = (show.providers && show.providers.length) ? show.providers : [{ name: 'Outros' }];
+            provs.forEach(function (p) {
+                var key = p.name || 'Outros';
+                (groups[key] = groups[key] || []).push({
+                    show: show, ep: ep, date: d, released: d <= now, logo: p.logo_path
+                });
+            });
+        });
+    });
+    var names = Object.keys(groups).sort(function (a, b) {
+        if (a === 'Outros') { return 1; }
+        if (b === 'Outros') { return -1; }
+        return a.localeCompare(b);
+    });
+    names.forEach(function (n) { groups[n].sort(function (a, b) { return a.date - b.date; }); });
+    return names.map(function (n) { return { provider: n, items: groups[n] }; });
+}
+
+function render(groups) {
+    els.body.innerHTML = '';
+    if (!groups.length) {
+        els.body.innerHTML = '<p class="empty">Nenhum lancamento previsto pra essa semana ' +
+            '(ou nenhuma serie tem episodio caindo entre segunda e domingo).</p>';
+        return;
+    }
+    groups.forEach(function (g) {
+        var sec = document.createElement('section');
+        sec.className = 'provider';
+
+        var h = document.createElement('h2');
+        var first = g.items[0];
+        var logo = (first && first.logo)
+            ? '<img src="https://image.tmdb.org/t/p/w92' + first.logo + '" alt="">' : '';
+        h.innerHTML = logo + '<span>' + escapeHtml(g.provider) + '</span>';
+        sec.appendChild(h);
+
+        var track = document.createElement('div');
+        track.className = 'track';
+
+        g.items.forEach(function (it) {
+            var a = document.createElement('a');
+            a.className = 'card';
+            a.href = 'https://www.themoviedb.org/tv/' + it.show.tmdb_id;
+            a.target = '_blank';
+            a.rel = 'noopener';
+
+            var wd = WD[it.date.getDay()];
+            var posterHtml = it.show.poster_path
+                ? '<img src="https://image.tmdb.org/t/p/w342' + it.show.poster_path + '" alt="">'
+                : '';
+
+            a.innerHTML =
+                '<div class="art">' + posterHtml +
+                '<span class="day-pill">' + wd + ' ' + fmtDate(it.date) + '</span>' +
+                '<span class="status-pill ' + (it.released ? 'released' : 'soon') + '">' +
+                (it.released ? 'Lancado' : 'Previsto') + '</span></div>' +
+                '<div class="card-title">' + escapeHtml(it.show.name || it.show.folder) + '</div>' +
+                '<div class="card-sub">T' + it.ep.season_number + ' E' + it.ep.episode_number +
+                (it.ep.name ? ' &bull; ' + escapeHtml(it.ep.name) : '') + '</div>';
+
+            var img = a.querySelector('.art img');
+            if (img) { img.onload = function () { img.classList.add('loaded'); }; }
+            track.appendChild(a);
+        });
+
+        sec.appendChild(track);
+        els.body.appendChild(sec);
+    });
+}
+
+function refresh(shows, apiKey) {
+    els.status.textContent = 'Atualizando previsoes...';
+    els.refreshBtn.disabled = true;
+    render(groupByProvider(shows));
+    fetchLive(shows, apiKey, function () {
+        saveCache(shows);
+        render(groupByProvider(shows));
+        els.status.textContent = 'Atualizado ' + new Date().toLocaleTimeString().slice(0, 5);
+        els.refreshBtn.disabled = false;
+    });
+}
+
+function init() {
+    var wk = weekRange(new Date());
+    els.weekRange.textContent = fmtDate(wk.start) + ' - ' + fmtDate(wk.end);
+
+    if (typeof CALENDAR_DATA === 'undefined' || !CALENDAR_DATA.shows || !CALENDAR_DATA.shows.length) {
+        els.status.textContent = '';
+        els.refreshBtn.hidden = true;
+        els.body.innerHTML = '<p class="empty">' +
+            '<code>calendario-data.js</code> nao encontrado ou vazio.<br><br>' +
+            'Rode no PowerShell, na pasta do projeto:<br><br>' +
+            '<code>.\\calendario-lancamentos.ps1 -ApiKey SUA_CHAVE</code><br><br>' +
+            'e recarregue esta pagina.</p>';
+        return;
+    }
+
+    var shows = CALENDAR_DATA.shows;
+    var apiKey = CALENDAR_DATA.apiKey;
+    els.refreshBtn.addEventListener('click', function () { refresh(shows, apiKey); });
+    refresh(shows, apiKey);
+}
+
+init();
+</script>
+</body>
+</html>

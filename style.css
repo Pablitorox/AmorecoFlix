@@ -1,0 +1,622 @@
+/* ============================================================
+   Meu Player USB - style.css
+   Foco em navegacao por controle remoto (D-pad).
+   Resolucao base da TV: 1920 x 1080.
+   ============================================================ */
+
+:root {
+    --bg:            #141414;   /* preto Netflix */
+    --bg-panel:      #1c1c1c;
+    --bg-row:        #2b2b2b;
+    --text:          #ffffff;
+    --text-2:        #d6d6d6;
+    --text-dim:      #8c8c8c;
+    --accent:        #e50914;
+    --accent-soft:   #ff5864;
+    --focus-ring:    #ffffff;
+    --progress-bg:   rgba(120,120,120,0.5);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+[hidden] { display: none !important; }
+
+html, body {
+    width: 1920px;
+    height: 1080px;
+    overflow: hidden;
+    background: var(--bg);
+    color: var(--text);
+    font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+    -webkit-user-select: none;
+    user-select: none;
+    cursor: none;                 /* sem mouse na TV */
+}
+
+/* Durante a reproducao o AVPlay desenha o video num plano de HARDWARE
+   ATRAS da pagina. Se o fundo da pagina for opaco, o video fica invisivel.
+   Entao deixamos tudo transparente enquanto o player esta ativo. */
+body.playing,
+body.playing #player-screen,
+body.playing #home-screen {
+    background: transparent !important;
+}
+
+.hidden { display: none !important; }
+
+/* ---------- Estrutura de telas ---------- */
+.screen { display: none; width: 100%; height: 100%; }
+.screen.active { display: block; }
+
+/* ============================================================
+   TELA INICIAL  (estilo Netflix)
+   ============================================================ */
+#home-screen {
+    height: 100%;
+    overflow: hidden;
+    background:
+        radial-gradient(1200px 400px at 20% -5%, rgba(60,10,14,0.55), transparent 70%),
+        var(--bg);
+}
+
+.app-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 34px 60px 4px;
+}
+.app-title {
+    font-size: 38px;
+    font-weight: 800;
+    letter-spacing: -0.5px;
+    color: var(--text);
+}
+.app-title-flix { color: var(--accent); }
+.usb-status { font-size: 17px; color: var(--text-dim); }
+.usb-status.ok    { color: #5fd08a; }
+.usb-status.error { color: var(--accent-soft); }
+
+/* ---------- Trilhos ---------- */
+.rail { padding: 6px 0 2px; }
+.rail.hidden { display: none; }
+
+.rail-title {
+    font-size: 22px;
+    font-weight: 700;
+    color: var(--text-2);
+    margin: 8px 0 4px 60px;
+}
+.browser-topbar {
+    display: flex;
+    align-items: baseline;
+    gap: 18px;
+    margin: 10px 0 0 60px;
+}
+.browser-topbar .rail-title { margin: 0; }
+
+.rail-track {
+    display: flex;
+    gap: 14px;
+    padding: 26px 60px;
+    overflow-x: auto;
+    overflow-y: visible;
+    scroll-behavior: smooth;
+}
+.rail-track::-webkit-scrollbar { height: 0; }
+
+.breadcrumb { font-size: 17px; color: var(--text-dim); }
+.breadcrumb .crumb.current { color: var(--text-2); font-weight: 600; }
+.breadcrumb .sep { margin: 0 8px; opacity: 0.5; }
+
+/* ---------- Grade de arquivos ---------- */
+.browser { padding: 2px 0 0; }
+.file-list {
+    list-style: none;
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
+    align-items: start;
+    gap: 12px 16px;
+    max-height: 540px;
+    overflow-y: auto;
+    padding: 28px 60px 40px;
+}
+.file-list::-webkit-scrollbar { width: 0; }
+.file-list .empty {
+    grid-column: 1 / -1;
+    text-align: center;
+    color: var(--text-dim);
+    padding: 50px 0;
+    font-size: 20px;
+}
+
+/* ---------- Card unificado ---------- */
+.card { position: relative; cursor: pointer; }
+.rail-track .card { flex: 0 0 322px; }
+
+.card .art {
+    position: relative;
+    width: 100%;
+    padding-top: 56.25%;                 /* 16:9 */
+    border-radius: 6px;
+    overflow: hidden;
+    background: linear-gradient(150deg, #2a3a4a, #161b22);
+    filter: brightness(0.82);
+    transition: transform 0.16s ease, box-shadow 0.16s ease, filter 0.16s ease;
+}
+.card.is-dir .art { background: linear-gradient(150deg, #31435a, #1b2431); }
+.card .art > * { position: absolute; top: 0; left: 0; right: 0; bottom: 0; }
+
+.card .art-img {
+    width: 100%; height: 100%;
+    object-fit: cover;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+}
+.card .art-img.loaded { opacity: 1; }
+.card .art-glyph {
+    display: flex; align-items: center; justify-content: center;
+    font-size: 24px; font-weight: 700; letter-spacing: 1px;
+    color: rgba(255,255,255,0.8);
+    text-shadow: 0 2px 8px rgba(0,0,0,0.55);
+}
+.card.is-dir .art-glyph { font-size: 44px; }
+.card .art-img.loaded ~ .art-glyph { display: none; }
+
+/* pasta com capa real: proporcao fixa 2:3 (padrao de poster) em vez do 16:9
+   forcado - sem precisar de fundo desfocado. Largura reduzida (metade da
+   coluna) pra nao dominar a grade ao lado dos cards 16:9. Proporcao FIXA
+   (nao "natural" da imagem) pra todo poster ficar do mesmo tamanho, mesmo
+   quando a capa baixada tem um formato levemente diferente. */
+.card .art.poster-thumb {
+    width: 50%;
+    margin: 0 auto;
+    padding-top: 75%;   /* 150% de 50% = proporcao 2:3 sobre a largura do card inteiro */
+    height: 0;
+    background: none;
+}
+.card .art.poster-thumb .art-img {
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.card .art-badge {
+    top: auto; left: auto; right: 7px; bottom: 7px;
+    background: rgba(0,0,0,0.8); color: #fff;
+    font-size: 13px; padding: 2px 7px; border-radius: 3px;
+}
+.card .art-check {
+    right: auto; bottom: auto; left: 7px; top: 7px;
+    width: 24px; height: 24px; border-radius: 50%;
+    background: var(--accent); color: #fff;
+    display: flex; align-items: center; justify-content: center; font-size: 14px;
+}
+.card .art-bar {
+    top: auto; height: 5px;
+    background: var(--progress-bg);
+}
+.card .art-bar i { display: block; height: 100%; background: var(--accent); }
+
+.card .card-title {
+    margin-top: 8px;
+    font-size: 16px; font-weight: 600; line-height: 1.25;
+    color: var(--text-dim);
+    max-height: 2.5em; overflow: hidden;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+}
+.card .card-sub {
+    font-size: 13px; color: #7a7a7a; margin-top: 2px; min-height: 1em;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+/* ---------- Foco ---------- */
+.card:focus, .card.focused, .card:hover { outline: none; }
+.card:focus .art, .card.focused .art, .card:hover .art {
+    filter: brightness(1);
+    transform: scale(1.07);
+    box-shadow: 0 0 0 3px var(--focus-ring), 0 18px 42px rgba(0,0,0,0.65);
+    z-index: 5;
+}
+.card:focus .card-title, .card.focused .card-title, .card:hover .card-title {
+    color: var(--text);
+}
+/* cards sao ".focusable" (pro Nav generico), mas nao devem herdar o fundo
+   vermelho solido do foco de botao/link - so o proprio .art (acima) mostra
+   o destaque. Sem isso, o fundo aparecia vazando ao redor do poster de
+   pastas (que agora e mais estreito que o card inteiro). */
+.card.focusable:focus, .card.focusable:hover, .card.focusable.focused {
+    background: none;
+    box-shadow: none;
+}
+
+.focusable:focus, .focusable:hover, .focusable.focused {
+    outline: none;
+    background: var(--accent);
+    color: #fff;
+    box-shadow: 0 0 0 4px var(--focus-ring);
+}
+
+/* ---------- Rodape de dicas ---------- */
+.hint-bar {
+    position: absolute;
+    bottom: 0; left: 0; right: 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px 30px;
+    padding: 16px 60px;
+    background: linear-gradient(to top, rgba(0,0,0,0.9), transparent);
+    font-size: 16px;
+    color: var(--text-dim);
+}
+.hint-bar .hint { display: inline-flex; align-items: center; gap: 9px; }
+
+/* pilulas coloridas imitando os botoes do controle remoto, em vez do nome
+   da cor em texto puro - mais rapido de reconhecer de longe na TV. */
+.hint-bar .key {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 30px;
+    height: 22px;
+    padding: 0 8px;
+    border-radius: 11px;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.3px;
+    line-height: 1;
+}
+.hint-bar .key-ok,
+.hint-bar .key-return {
+    background: rgba(255,255,255,0.12);
+    color: var(--text-2);
+    border: 1px solid rgba(255,255,255,0.28);
+}
+.hint-bar .key-red   { background: var(--accent); color: #fff; }
+.hint-bar .key-green { background: #23a55a;        color: #fff; }
+.hint-bar .key-blue  { background: #3b82f6;        color: #fff; }
+
+/* ============================================================
+   PLAYER  (estilo streaming)
+   ============================================================ */
+#player-screen {
+    background: #000;
+    position: absolute;
+    top: 0; left: 0;
+    width: 1920px; height: 1080px;
+}
+
+#av-player,
+#html5-player {
+    position: absolute;
+    top: 0; left: 0;
+    width: 1920px;
+    height: 1080px;
+    background: #000;
+}
+
+.player-ui {
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    z-index: 10;
+    opacity: 1;
+    transition: opacity 0.35s ease;
+}
+.player-ui.faded { opacity: 0; pointer-events: none; }
+/* scrims separados (topo e base) */
+.player-ui::before, .player-ui::after {
+    content: ""; position: absolute; left: 0; right: 0;
+}
+.player-ui::before { top: 0; height: 260px;
+    background: linear-gradient(to bottom, rgba(0,0,0,0.75), rgba(0,0,0,0)); }
+.player-ui::after  { bottom: 0; height: 360px;
+    background: linear-gradient(to top, rgba(0,0,0,0.9), rgba(0,0,0,0)); }
+
+/* ---------- topo ---------- */
+.p-top {
+    position: absolute; top: 48px; left: 80px; right: 80px;
+    display: flex; align-items: flex-start; justify-content: space-between; gap: 24px;
+}
+.p-titlebox { min-width: 0; }
+.p-crumb {
+    font-size: 19px; font-weight: 600; letter-spacing: 0.5px;
+    color: var(--accent); text-transform: uppercase;
+    text-shadow: 0 2px 8px #000; margin-bottom: 6px; min-height: 1px;
+}
+.p-title {
+    font-size: 40px; font-weight: 800; letter-spacing: -0.3px;
+    text-shadow: 0 3px 14px rgba(0,0,0,0.7);
+    max-width: 70%; line-height: 1.15;
+}
+
+/* ---------- engrenagem (audio/legendas) ---------- */
+.p-gear {
+    flex: none;
+    width: 58px; height: 58px;
+    display: flex; align-items: center; justify-content: center;
+    border: none; border-radius: 50%;
+    background: rgba(255,255,255,0.14);
+    color: #fff; cursor: pointer;
+    transition: background 0.12s ease, transform 0.12s ease, box-shadow 0.12s ease;
+}
+.p-gear svg { width: 30px; height: 30px; fill: currentColor; }
+.p-gear:focus, .p-gear.focused {
+    outline: none; background: #fff; color: #111;
+    transform: scale(1.1); box-shadow: 0 0 0 4px rgba(255,255,255,0.35);
+}
+
+/* ---------- painel de audio/legendas ---------- */
+.p-settings {
+    position: absolute; top: 0; right: 0; bottom: 0;
+    width: 480px;
+    background: linear-gradient(to left, rgba(0,0,0,0.96), rgba(0,0,0,0.82));
+    z-index: 80;
+    animation: setIn 0.22s ease;
+    overflow-y: auto;
+}
+@keyframes setIn { from { transform: translateX(60px); opacity: 0; } }
+.p-settings-in { padding: 70px 56px; }
+.p-settings-h {
+    font-size: 17px; font-weight: 700; letter-spacing: 1px;
+    text-transform: uppercase; color: var(--text-dim);
+    margin: 26px 0 10px;
+}
+.p-settings-h:first-child { margin-top: 0; }
+.p-set-list { display: flex; flex-direction: column; }
+.p-set-opt {
+    display: flex; align-items: center; gap: 14px;
+    padding: 14px 16px; border-radius: 8px;
+    font-size: 21px; color: var(--text-2); cursor: pointer;
+}
+.p-set-opt .p-check {
+    width: 22px; flex: none; text-align: center;
+    color: var(--accent); font-size: 18px; opacity: 0;
+}
+.p-set-opt.on .p-check { opacity: 1; }
+.p-set-opt.on { color: #fff; font-weight: 600; }
+.p-set-opt:focus, .p-set-opt.focused {
+    outline: none; background: rgba(255,255,255,0.14); color: #fff;
+}
+
+/* ---------- indicador central play/pause ---------- */
+.p-center {
+    position: absolute; left: 50%; top: 50%;
+    width: 132px; height: 132px; margin: -66px 0 0 -66px;
+    border-radius: 50%;
+    background: rgba(0,0,0,0.55);
+    display: flex; align-items: center; justify-content: center;
+    color: #fff;
+    pointer-events: none;
+    opacity: 0;
+    z-index: 12;                     /* acima do scrim, visivel mesmo com HUD esmaecida */
+}
+.p-center svg { width: 60px; height: 60px; fill: currentColor; }
+/* flash rapido ao voltar a reproduzir */
+.p-center.flash { animation: pcenter 0.65s ease forwards; }
+/* fica na tela enquanto estiver pausado */
+.p-center.stay {
+    opacity: 1; transform: scale(1);
+    animation: pcenter-in 0.2s ease;
+}
+@keyframes pcenter {
+    0%   { opacity: 0; transform: scale(0.7); }
+    25%  { opacity: 1; transform: scale(1); }
+    100% { opacity: 0; transform: scale(1.25); }
+}
+@keyframes pcenter-in {
+    from { opacity: 0; transform: scale(0.7); }
+    to   { opacity: 1; transform: scale(1); }
+}
+
+/* ---------- base ---------- */
+.p-bottom { position: absolute; left: 80px; right: 80px; bottom: 44px; }
+
+.p-scrub { position: relative; height: 24px; display: flex; align-items: center; }
+.p-scrub-track {
+    position: relative; width: 100%; height: 6px;
+    background: rgba(255,255,255,0.28); border-radius: 3px; overflow: hidden;
+    transition: height 0.15s ease;
+}
+.p-scrub-buf {
+    position: absolute; left: 0; top: 0; height: 100%; width: 0%;
+    background: rgba(255,255,255,0.4);
+}
+.p-scrub-fill {
+    position: absolute; left: 0; top: 0; height: 100%; width: 0%;
+    background: var(--accent);
+}
+.p-scrub-knob {
+    position: absolute; top: 50%; left: 0;
+    width: 16px; height: 16px; margin: -8px 0 0 -8px;
+    background: var(--accent); border-radius: 50%;
+    box-shadow: 0 0 0 0 rgba(229,9,20,0.35);
+    transition: width 0.15s ease, height 0.15s ease, margin 0.15s ease, box-shadow 0.15s ease;
+}
+/* modo "seek": barra e knob crescem */
+.p-scrub.seeking .p-scrub-track { height: 9px; }
+.p-scrub.seeking .p-scrub-knob {
+    width: 24px; height: 24px; margin: -12px 0 0 -12px;
+    box-shadow: 0 0 0 8px rgba(229,9,20,0.28);
+}
+.p-scrub-preview {
+    position: absolute; bottom: 28px; left: 50%; transform: translateX(-50%);
+    background: rgba(20,20,20,0.95); color: #fff;
+    font-size: 20px; font-variant-numeric: tabular-nums;
+    padding: 6px 12px; border-radius: 6px; white-space: nowrap;
+    opacity: 0; transition: opacity 0.12s ease;
+}
+.p-scrub.scrubbing .p-scrub-preview { opacity: 1; }
+
+.p-times {
+    display: flex; justify-content: space-between;
+    margin-top: 12px;
+    font-size: 19px; font-variant-numeric: tabular-nums;
+    color: rgba(255,255,255,0.9);
+    text-shadow: 0 1px 6px #000;
+}
+
+.p-controls { display: flex; align-items: center; gap: 22px; margin-top: 26px; }
+.p-ic {
+    width: 60px; height: 60px; flex: none;
+    display: flex; align-items: center; justify-content: center;
+    border: none; border-radius: 50%;
+    background: rgba(255,255,255,0.12);
+    color: #fff; cursor: pointer;
+    transition: background 0.12s ease, transform 0.12s ease, box-shadow 0.12s ease;
+}
+.p-ic svg { width: 30px; height: 30px; fill: currentColor; }
+.p-ic-lg { width: 76px; height: 76px; }
+.p-ic-lg svg { width: 40px; height: 40px; }
+.p-ic:focus, .p-ic.focused {
+    outline: none;
+    background: #fff; color: #111;
+    transform: scale(1.1);
+    box-shadow: 0 0 0 4px rgba(255,255,255,0.35);
+}
+
+/* ---------- Botoes de dialogo (menu contexto, proximo episodio) ---------- */
+.pc-btn {
+    font-family: inherit;
+    font-size: 20px;
+    color: var(--text);
+    background: rgba(255,255,255,0.14);
+    border: none;
+    border-radius: 6px;
+    padding: 14px 26px;
+    cursor: pointer;
+    transition: background 0.12s ease, transform 0.12s ease;
+}
+.pc-btn:focus, .pc-btn.focused {
+    outline: none;
+    background: #fff;
+    color: #000;
+    transform: scale(1.06);
+    box-shadow: 0 0 0 3px rgba(255,255,255,0.5);
+}
+
+/* ---------- Botao "Pular abertura" ---------- */
+.skip-btn {
+    position: absolute;
+    right: 80px;
+    bottom: 130px;
+    z-index: 70;                 /* acima da HUD, mesmo quando ela some */
+    font-family: inherit;
+    font-size: 22px;
+    font-weight: 600;
+    color: #fff;
+    background: rgba(20,20,20,0.86);
+    border: 2px solid rgba(255,255,255,0.5);
+    border-radius: 6px;
+    padding: 16px 30px;
+    cursor: pointer;
+    animation: skipIn 0.25s ease;
+}
+@keyframes skipIn { from { opacity: 0; transform: translateY(12px); } }
+.skip-btn:focus, .skip-btn.focused {
+    outline: none;
+    background: #fff;
+    color: #000;
+    border-color: #fff;
+    box-shadow: 0 0 0 4px rgba(255,255,255,0.35);
+}
+
+/* ---------- Toast de proximo episodio ---------- */
+.next-toast {
+    position: absolute;
+    right: 80px;
+    bottom: 80px;
+    width: 460px;
+    background: var(--bg-panel);
+    border-radius: 14px;
+    padding: 28px;
+    box-shadow: 0 12px 48px rgba(0,0,0,0.6);
+}
+.next-toast p { color: var(--text-dim); font-size: 20px; }
+.next-toast strong { display: block; font-size: 26px; margin: 10px 0 22px; }
+.next-toast-actions { display: flex; gap: 16px; }
+
+/* ---------- Menu de contexto (Continuar assistindo) ---------- */
+.ctx-menu {
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 28px;
+    background: rgba(0,0,0,0.72);
+    z-index: 60;
+}
+.ctx-title { font-size: 30px; font-weight: 700; max-width: 70%; text-align: center; }
+.ctx-actions { display: flex; gap: 20px; }
+
+/* ---------- Status/progresso de recebimento de arquivo (nao-modal) ---------- */
+.net-upload {
+    position: absolute;
+    left: 40px;
+    bottom: 100px;
+    z-index: 55;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    width: 420px;
+    padding: 18px 22px;
+    background: rgba(20,20,20,0.92);
+    border: 1px solid rgba(255,255,255,0.14);
+    border-radius: 10px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+}
+.net-upload-status { font-size: 16px; color: var(--text); word-break: break-all; }
+.net-upload-track {
+    width: 100%;
+    height: 8px;
+    border-radius: 4px;
+    background: rgba(255,255,255,0.14);
+    overflow: hidden;
+}
+.net-upload-fill {
+    height: 100%;
+    width: 0%;
+    background: #5fd08a;
+    transition: width 0.2s ease;
+}
+.net-upload-pct { font-size: 14px; color: var(--text-dim); }
+
+/* ---------- Console de debug ---------- */
+.dbg {
+    position: absolute;
+    left: 40px; right: 40px; bottom: 40px;
+    max-height: 55%;
+    overflow: auto;
+    margin: 0;
+    padding: 20px;
+    background: rgba(0,0,0,0.88);
+    color: #7CFC7C;
+    font-family: "Consolas", "Courier New", monospace;
+    font-size: 17px;
+    line-height: 1.45;
+    white-space: pre-wrap;
+    word-break: break-all;
+    border: 1px solid #2f5d2f;
+    border-radius: 8px;
+    z-index: 90;
+}
+
+/* ---------- Spinner ---------- */
+.spinner {
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0,0,0,0.55);
+    z-index: 50;
+}
+.spinner-dot {
+    width: 72px; height: 72px;
+    border: 8px solid rgba(255,255,255,0.2);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.9s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
