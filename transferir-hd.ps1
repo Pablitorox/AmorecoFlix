@@ -69,5 +69,12 @@ if ($code -ge 8) {
     }
     Write-Host ""
     Write-Host "OK - $msg" -ForegroundColor Green
+
+    # Checa compatibilidade dos videos recem-transferidos com o player da TV
+    # (heuristico - ver checar-compatibilidade.ps1). Nao falha a transferencia.
+    $compatLib = Join-Path $PSScriptRoot 'checar-compatibilidade.ps1'
+    if (Test-Path -LiteralPath $compatLib) {
+        & $compatLib -Path $Dst
+    }
     exit 0
 }

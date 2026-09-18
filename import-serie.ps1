@@ -32,6 +32,10 @@ $sext = @('.srt','.ass','.ssa','.sub','.idx','.vtt')
 
 $ffmpeg = (Get-Command ffmpeg -EA 0).Source
 if (-not $ffmpeg) { $b = Get-ChildItem "$env:LOCALAPPDATA\Microsoft\WinGet\Packages\Gyan.FFmpeg_*" -Recurse -Filter ffmpeg.exe -EA 0 | Select-Object -First 1; if ($b) { $ffmpeg = $b.FullName } }
+$ffprobe = $null
+if ($ffmpeg) { $ffprobe = Join-Path (Split-Path $ffmpeg) 'ffprobe.exe' }
+$compatLib = Join-Path $PSScriptRoot 'checar-compatibilidade.ps1'
+if (Test-Path -LiteralPath $compatLib) { . $compatLib -AsLibrary }
 if (-not (Test-Path -LiteralPath $Src)) { Write-Error "pasta nao existe: $Src"; exit 1 }
 
 if ($Season -le 0 -and $Src -match '(\d{1,2})\s*[' + $ORD + 'a]?\s*Temporada') { $Season = [int]$matches[1] }
@@ -72,6 +76,10 @@ foreach ($v in ($vids | Sort-Object Name)) {
     if ($WhatIf) { $imported += [pscustomobject]@{ Ep=$ep; NewName=($newBase+$v.Extension) }; continue }
 
     if (Copy-Verify $v.FullName $dest) {
+        if (Get-Command Get-CompatIssues -EA 0) {
+            $issues = Get-CompatIssues -File $dest -Ffprobe $ffprobe
+            foreach ($i in $issues) { Write-Host "    AVISO compatibilidade: $i" -ForegroundColor Yellow }
+        }
         $subsDir = Join-Path $Root 'subs'
         New-Item -ItemType Directory -Force -Path $subsDir | Out-Null
         Get-ChildItem -LiteralPath $v.DirectoryName -File | Where-Object {
