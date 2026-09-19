@@ -46,7 +46,7 @@ foreach ($v in $vids) {
     $dur = 0.0
     try {
         $d = & $ffprobe -v error -show_entries format=duration -of csv=p=0 -- "$($v.FullName)" 2>$null
-        if ($d) { $dur = [double]($d -replace ',', '.') }
+        if ($d) { [double]::TryParse(($d -replace ',', '.'), [Globalization.NumberStyles]::Float, [Globalization.CultureInfo]::InvariantCulture, [ref]$dur) | Out-Null }
     } catch {}
     if ($dur -le 0) { $dur = 600 }
     $ss = [Math]::Max(30, [Math]::Min($dur * 0.15, 420))
