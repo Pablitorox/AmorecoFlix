@@ -12,3 +12,6 @@ signature*.xml
 
 # locks/estado local
 .claude/scheduled_tasks.lock
+
+# chaves/segredos locais (TMDB etc.) - nunca commitar
+.env

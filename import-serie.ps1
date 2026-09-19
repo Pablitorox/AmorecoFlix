@@ -18,12 +18,15 @@ param(
     [Parameter(Mandatory=$true)][string]$Src,
     [Parameter(Mandatory=$true)][string]$Show,
     [Parameter(Mandatory=$true)][int]$TvId,
-    [Parameter(Mandatory=$true)][string]$ApiKey,
+    [string]$ApiKey,
     [int]$Season = 0,
     [string]$Root = 'E:\AmorecoFlix',
     [switch]$WhatIf
 )
 $ErrorActionPreference = 'Continue'
+. (Join-Path $PSScriptRoot 'tmdb-key.ps1')
+if (-not $ApiKey) { $ApiKey = Get-TmdbApiKey }
+if (-not $ApiKey) { Write-Error "Informe -ApiKey ou crie .env com TMDB_API_KEY=..."; exit 1 }
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 $ORD = [char]0x00AA          # 'a' ordinal feminino, sem problema de encoding
 $ThumbsDir = Join-Path $Root 'thumbs'
@@ -44,6 +47,7 @@ if ($Season -le 0 -and (Split-Path $Src -Leaf) -match '[sS](\d{1,2})') { $Season
 $vids = Get-ChildItem -LiteralPath $Src -Recurse -File | Where-Object { $vext -contains $_.Extension.ToLower() }
 if (-not $vids) { Write-Error "nenhum video em $Src"; exit 1 }
 if ($Season -le 0 -and $vids[0].Name -match '[sS](\d{1,2})[\s._\-]*[eE]\d') { $Season = [int]$matches[1] }
+if ($Season -le 0 -and $vids[0].Name -match '(\d{1,2})[xX]\d{1,3}') { $Season = [int]$matches[1] }
 if ($Season -le 0) { Write-Error "temporada nao detectada - use -Season N"; exit 1 }
 
 $seasonFolder = "$Show - $Season$ORD Temporada"
@@ -53,11 +57,25 @@ if (-not $WhatIf) { New-Item -ItemType Directory -Force -Path $destDir | Out-Nul
 
 function Get-Ep($name) {
     if ($name -match '[sS]\d{1,2}[\s._\-]*[eE](\d{1,3})') { return [int]$matches[1] }
+    if ($name -match '\d{1,2}[xX](\d{1,3})') { return [int]$matches[1] }
     if ($name -match '^\s*(\d{1,3})\s*[-.\s]') { return [int]$matches[1] }
     return 0
 }
 function Copy-Verify($src, $dst) {
-    if ((Test-Path -LiteralPath $dst) -and (Get-Item -LiteralPath $dst).Length -eq (Get-Item -LiteralPath $src).Length) { return $true }
+    if ((Test-Path -LiteralPath $dst) -and (Get-Item -LiteralPath $dst).Length -eq (Get-Item -LiteralPath $src).Length) {
+        # so aceita "ja copiado" por tamanho se o destino tambem passar na
+        # checagem basica - senao um re-download do MESMO tamanho (mesmo
+        # release, ex: pack de novo do mesmo torrent) nunca substituiria um
+        # arquivo ja corrompido (moov ausente etc) que so tem o tamanho igual
+        # por coincidencia de encode, nao por ser o mesmo conteudo intacto.
+        if (Get-Command Get-CompatIssues -EA 0) {
+            $destIssues = Get-CompatIssues -File $dst -Ffprobe $ffprobe -Ffmpeg $ffmpeg -SkipIntegrity
+            if (-not $destIssues) { return $true }
+            Write-Host "    destino ja existe com o mesmo tamanho mas esta com problema ($($destIssues -join '; ')) - recopiando" -ForegroundColor Yellow
+        } else {
+            return $true
+        }
+    }
     try {
         $in  = [IO.File]::Open($src, 'Open', 'Read', 'ReadWrite')
         $out = [IO.File]::Create($dst)
@@ -75,9 +93,20 @@ foreach ($v in ($vids | Sort-Object Name)) {
     Write-Host ("  E{0:D2}  {1}" -f $ep, $v.Name)
     if ($WhatIf) { $imported += [pscustomobject]@{ Ep=$ep; NewName=($newBase+$v.Extension) }; continue }
 
+    # origem com problema grave (corrompida/truncada) NAO pode sobrescrever
+    # um destino existente - preserva a copia atual, so avisa.
+    if ((Test-Path -LiteralPath $dest) -and (Get-Command Get-CompatIssues -EA 0)) {
+        $srcIssues = @(Get-CompatIssues -File $v.FullName -Ffprobe $ffprobe -Ffmpeg $ffmpeg -SkipIntegrity) | Where-Object { $_ -match 'CORROMPIDO|TRUNCADO|sem faixa' }
+        if ($srcIssues) {
+            Write-Host ("    ORIGEM COM PROBLEMA ({0}) - mantendo o arquivo atual na biblioteca, NAO sobrescrevi" -f ($srcIssues -join '; ')) -ForegroundColor Red
+            $imported += [pscustomobject]@{ Ep=$ep; NewName=($newBase+$v.Extension) }
+            continue
+        }
+    }
+
     if (Copy-Verify $v.FullName $dest) {
         if (Get-Command Get-CompatIssues -EA 0) {
-            $issues = Get-CompatIssues -File $dest -Ffprobe $ffprobe
+            $issues = Get-CompatIssues -File $dest -Ffprobe $ffprobe -Ffmpeg $ffmpeg
             foreach ($i in $issues) { Write-Host "    AVISO compatibilidade: $i" -ForegroundColor Yellow }
         }
         $subsDir = Join-Path $Root 'subs'

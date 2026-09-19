@@ -17,12 +17,15 @@
     .\posters-pastas.ps1 -ApiKey SUA_CHAVE -Remote
 #>
 param(
-    [Parameter(Mandatory = $true)][string]$ApiKey,
+    [string]$ApiKey,
     [string]$Root = 'E:\AmorecoFlix',
     [switch]$Remote,
     [string]$ApiUrl = 'http://localhost:8790'
 )
 $ErrorActionPreference = 'Continue'
+. (Join-Path $PSScriptRoot 'tmdb-key.ps1')
+if (-not $ApiKey) { $ApiKey = Get-TmdbApiKey }
+if (-not $ApiKey) { Write-Error "Informe -ApiKey ou crie .env com TMDB_API_KEY=..."; exit 1 }
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
 if (-not $Remote) {

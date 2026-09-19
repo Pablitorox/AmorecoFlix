@@ -19,11 +19,14 @@
     .\calendario-lancamentos.ps1 -ApiKey SUA_CHAVE
 #>
 param(
-    [Parameter(Mandatory = $true)][string]$ApiKey,
+    [string]$ApiKey,
     [string]$Root   = 'E:\AmorecoFlix',
     [string]$OutDir = $PSScriptRoot
 )
 $ErrorActionPreference = 'Continue'
+. (Join-Path $PSScriptRoot 'tmdb-key.ps1')
+if (-not $ApiKey) { $ApiKey = Get-TmdbApiKey }
+if (-not $ApiKey) { Write-Error "Informe -ApiKey ou crie .env com TMDB_API_KEY=..."; exit 1 }
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
 # abreviacoes / correcoes de nome p/ busca (mesmas de posters-pastas.ps1)
