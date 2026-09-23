@@ -1722,7 +1722,7 @@ var UI = (function () {
         el.nowPlaying.textContent = cleanName(name);
         el.homeScreen.classList.remove('active');
         el.playerScreen.classList.add('active');
-        el.nextToast.classList.add('hidden');
+        hideNextToast();
         el.pCenter.hidden = true;
         el.pCenter.classList.remove('flash', 'stay');
         fadeUi(false);
@@ -1891,18 +1891,60 @@ var UI = (function () {
         el.scrub.classList.add('scrubbing');
     }
 
+    var AUTOPLAY_SECS  = 5;
+    var RING_R         = 17;
+    var RING_C         = 2 * Math.PI * RING_R;
+    var nextToastInterval = null;
+    var btnToastPlay  = document.getElementById('btn-toast-play');
+    var ringFill      = document.getElementById('toast-ring-fill');
+    var ringNum       = document.getElementById('next-toast-secs');
+
+    function clearNextToastTimer() {
+        if (nextToastInterval) { clearInterval(nextToastInterval); nextToastInterval = null; }
+    }
+
+    function hideNextToast() {
+        clearNextToastTimer();
+        el.nextToast.classList.add('hidden');
+    }
+
     function showNextToast(entry, onPlay) {
         var ep = epLabel(entry.name);
         el.nextToastNm.textContent = cleanName(entry.name) + (ep ? '  •  ' + ep : '');
         el.nextToast.classList.remove('hidden');
-        var btnPlay   = document.getElementById('btn-toast-play');
+        var btnPlay   = btnToastPlay;
         var btnCancel = document.getElementById('btn-toast-cancel');
-        btnPlay.onclick   = function () { el.nextToast.classList.add('hidden'); onPlay(); };
-        btnCancel.onclick = function () { el.nextToast.classList.add('hidden'); goHome(); };
+        var secsLeft  = AUTOPLAY_SECS;
+
+        clearNextToastTimer();
+
+        // reseta o anel pro estado "cheio" sem animar, depois liga a transicao
+        ringFill.style.transition = 'none';
+        ringFill.style.strokeDashoffset = '0';
+        ringNum.textContent = secsLeft;
+        ringFill.getBoundingClientRect(); // forca reflow
+        ringFill.style.transition = 'stroke-dashoffset 1s linear';
+
+        btnPlay.onclick   = function () { hideNextToast(); onPlay(); };
+        btnCancel.onclick = function () { hideNextToast(); goHome(); };
+
+        nextToastInterval = setInterval(function () {
+            secsLeft--;
+            if (secsLeft <= 0) {
+                hideNextToast();
+                onPlay();
+            } else {
+                ringNum.textContent = secsLeft;
+                ringFill.style.strokeDashoffset =
+                    (RING_C * (AUTOPLAY_SECS - secsLeft) / AUTOPLAY_SECS) + '';
+            }
+        }, 1000);
+
         Nav.focusFirst('toast');
     }
 
     function toast(msg) {
+        clearNextToastTimer();
         el.nextToastNm.textContent = msg;
         el.nextToast.classList.remove('hidden');
         setTimeout(function () { el.nextToast.classList.add('hidden'); }, 3500);
@@ -1921,7 +1963,7 @@ var UI = (function () {
         buildSettings: buildSettings, openSettings: openSettings,
         closeSettings: closeSettings, settingsOpen: settingsOpen,
         updateSkip: updateSkip, hideSkip: hideSkip, doSkip: doSkip, skipVisible: skipVisible,
-        showNextToast: showNextToast, toast: toast, el: el
+        showNextToast: showNextToast, hideNextToast: hideNextToast, toast: toast, el: el
     };
 })();
 
@@ -2462,10 +2504,12 @@ function playNextEpisode() {
 }
 
 function stopAndGoHome() {
+    UI.hideNextToast();
     Player.stop(true);
     goHome();
 }
 function goHome() {
+    UI.hideNextToast();
     Nav.setGroup('files');
     UI.showHome();
     NetUpload.kickReconnect();

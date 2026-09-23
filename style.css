@@ -535,6 +535,35 @@ body.playing #home-screen {
 .next-toast strong { display: block; font-size: 26px; margin: 10px 0 22px; }
 .next-toast-actions { display: flex; gap: 16px; }
 
+.pc-btn-ring { display: flex; align-items: center; gap: 14px; }
+.toast-ring { position: relative; width: 34px; height: 34px; flex: 0 0 34px; }
+.toast-ring-svg { width: 100%; height: 100%; transform: rotate(-90deg); }
+.toast-ring-track {
+    fill: none;
+    stroke: currentColor;
+    stroke-opacity: 0.28;
+    stroke-width: 3;
+}
+.toast-ring-fill {
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 3;
+    stroke-linecap: round;
+    stroke-dasharray: 106.81;
+    stroke-dashoffset: 0;
+    transition: stroke-dashoffset 1s linear;
+}
+.toast-ring-num {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+}
+
 /* ---------- Menu de contexto (Continuar assistindo) ---------- */
 .ctx-menu {
     position: absolute;
