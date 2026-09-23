@@ -360,10 +360,21 @@ var Player = (function () {
                 // quebrado nesse ponto do arquivo) - guarda p/ a proxima abertura
                 // (automatica OU manual, via Continuar assistindo) pular esse seek
                 // e comecar do zero, em vez de repetir a mesma falha sem parar.
-                if (Date.now() < seekingUntil && seekTarget) {
+                var wasResumeSeek = Date.now() < seekingUntil && !!seekTarget;
+                if (wasResumeSeek) {
                     rememberFailedSeek(currentUri, seekTarget);
                 }
-                if (started && reopenCount < 2) {     // tenta reabrir
+                if (wasResumeSeek && reopenCount < 3) {
+                    // a falha e no seek de retomada, nao no arquivo - reabre do
+                    // zero direto (mesmo que nenhum frame tenha chegado a
+                    // aparecer ainda), em vez de cair no "Erro ao reproduzir"
+                    // sem nunca tentar tocar o episodio.
+                    reopenCount++;
+                    seekingUntil = 0;
+                    resumeMs = 0;
+                    UI.toast('Nao consegui retomar do ponto salvo, comecando do inicio...');
+                    loadAvplay(currentUri);
+                } else if (started && reopenCount < 2) {     // tenta reabrir
                     reopenCount++;
                     resumeMs = seekKnownBad(currentUri, position) ? 0 : position;
                     UI.toast('Recuperando a reproducao...');
@@ -1490,10 +1501,41 @@ var UI = (function () {
         img.src = uri;
     }
 
+    /* nome da serie a partir do caminho do arquivo (pasta pai = "Serie - N Temporada").
+       Usado tanto no titulo do player (guessShow) quanto pra agrupar o
+       "Continuar assistindo" por serie, ignorando a temporada. */
+    function seriesNameFromPath(path) {
+        var parts = String(path || '').replace(/\\/g, '/').split('/');
+        var parent = parts[parts.length - 2] || '';
+        parent = parent.replace(/\s*-\s*\d+[ªa]?\s*Temporada.*$/i, '').trim();
+        return (parent && parent.toLowerCase() !== 'series' && parent.toLowerCase() !== 'animes'
+                && parent.toLowerCase() !== 'filmes') ? parent : '';
+    }
+
+    /* Uma serie pode ter um episodio em andamento em mais de uma temporada
+       (ex.: terminou a T1 mas o ultimo episodio nao bateu o limiar de
+       "assistido", e ja comecou a T2) - sem isso apareceriam 2 cards de
+       "continuar assistindo" pra mesma serie. Mantem so o mais recente por
+       serie (a lista ja vem ordenada por 'updated' desc). Filmes/arquivos
+       soltos (sem serie detectavel) nunca sao agrupados entre si. */
+    function dedupeContinueBySeries(items) {
+        var out = [], seen = {};
+        for (var i = 0; i < items.length; i++) {
+            var r = items[i];
+            var key = seriesNameFromPath(r.path).toLowerCase();
+            if (key) {
+                if (seen.hasOwnProperty(key)) { continue; }
+                seen[key] = true;
+            }
+            out.push(r);
+        }
+        return out;
+    }
+
     /* --- Continuar assistindo (trilho) --- */
     function renderContinue() {
         var items;
-        try { items = ProgressStore.continueList(12); }
+        try { items = dedupeContinueBySeries(ProgressStore.continueList()).slice(0, 12); }
         catch (e) { console.error('[continue] erro:', e && e.message); items = []; }
         console.log('[continue] itens em progresso:', items.length);
         el.continueList.innerHTML = '';
@@ -1686,13 +1728,7 @@ var UI = (function () {
         fadeUi(false);
     }
     function guessShow(name) {
-        // pasta pai = nome da serie (se houver)
-        var p = App.playingPath || '';
-        var parts = p.replace(/\\/g, '/').split('/');
-        var parent = parts[parts.length - 2] || '';
-        parent = parent.replace(/\s*-\s*\d+[ªa]?\s*Temporada.*$/i, '').trim();
-        return (parent && parent.toLowerCase() !== 'series' && parent.toLowerCase() !== 'animes'
-                && parent.toLowerCase() !== 'filmes') ? parent : '';
+        return seriesNameFromPath(App.playingPath);
     }
     function showHome() {
         el.playerScreen.classList.remove('active');
