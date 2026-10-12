@@ -8,40 +8,136 @@
 </head>
 <body>
 
-    <!-- ================= TELA INICIAL ================= -->
-    <div id="home-screen" class="screen active">
+    <!-- ================= BARRA DO TOPO (Inicio, Biblioteca, Pastas) ================= -->
+    <header id="topbar" class="topbar">
+        <div class="logo">Amoreco<span>Flix</span></div>
+        <nav class="tabs" data-nav-group="tabs" aria-label="Seções">
+            <button class="tab focusable" data-screen="home">Início</button>
+            <button class="tab focusable" data-screen="catalog">Biblioteca</button>
+            <button class="tab focusable" data-screen="folders">Pastas</button>
+        </nav>
+        <div id="hd-status" class="hd-status"></div>
+    </header>
 
-        <header class="app-header">
-            <h1 class="app-title">Amoreco<span class="app-title-flix">Flix</span></h1>
-            <div id="usb-status" class="usb-status">Procurando dispositivos USB...</div>
+    <!-- ================= INICIO ================= -->
+    <div id="screen-home" class="screen">
+        <div class="backdrop"><img id="hero-img" class="art-img" alt=""></div>
+        <div class="backdrop-shade-l" aria-hidden="true"></div>
+        <div class="backdrop-shade-b" aria-hidden="true"></div>
+        <div id="home-scroll" class="home-scroll">
+            <section class="hero" aria-label="Destaque">
+                <div id="hero-kicker" class="kicker"></div>
+                <h1 id="hero-title" class="hero-title"></h1>
+                <p id="hero-text" class="hero-text"></p>
+                <div id="hero-prog" class="hero-prog"><span id="hero-prog-text"></span><div class="mini-bar"><i id="hero-prog-fill"></i></div></div>
+                <div class="hero-actions" data-nav-group="hero">
+                    <button id="hero-play" class="btn btn-primary focusable"></button>
+                    <button id="hero-info" class="btn btn-secondary focusable"></button>
+                </div>
+            </section>
+            <section id="row-continue" class="row" aria-label="Continuar assistindo">
+                <h2 class="row-h">Continuar assistindo</h2>
+                <div class="row-view"><div id="rail-continue" class="row-rail" data-nav-group="continue"></div></div>
+            </section>
+            <section id="row-nextup" class="row" aria-label="Próximos episódios">
+                <h2 class="row-h">Próximos episódios</h2>
+                <div class="row-view"><div id="rail-nextup" class="row-rail" data-nav-group="nextup"></div></div>
+            </section>
+        </div>
+    </div>
+
+    <!-- ================= PAGINA DO TITULO (serie, filme, colecao) ================= -->
+    <div id="screen-series" class="screen">
+        <div class="backdrop backdrop-series"><img id="series-img" class="art-img" alt=""></div>
+        <div class="backdrop-shade-l series-shade-l" aria-hidden="true"></div>
+        <div class="backdrop-shade-b series-shade-b" aria-hidden="true"></div>
+        <header class="series-top">
+            <span class="series-back"><b class="key-chip">RETURN</b>Voltar</span>
+            <div class="logo">Amoreco<span>Flix</span></div>
         </header>
+        <div id="series-scroll" class="series-scroll">
+            <section class="series-info" aria-label="Sobre o título">
+                <div id="series-kicker" class="kicker"></div>
+                <h1 id="series-title" class="hero-title"></h1>
+                <p id="series-text" class="hero-text"></p>
+                <div id="series-chips" class="info-chips"></div>
+                <div class="hero-actions" data-nav-group="series-actions">
+                    <button id="series-play" class="btn btn-primary focusable"></button>
+                    <button id="series-restart" class="btn btn-secondary focusable"></button>
+                    <button id="series-mark" class="btn btn-secondary btn-icon focusable"></button>
+                </div>
+            </section>
+            <section id="series-eps" class="series-eps" aria-label="Episódios">
+                <div class="series-eps-head">
+                    <h2 id="series-eps-h" class="row-h">Episódios</h2>
+                    <button id="season-btn" class="season-btn focusable" data-nav-group="season"></button>
+                </div>
+                <div class="row-view"><div id="series-rail" class="row-rail" data-nav-group="series-eps"></div></div>
+            </section>
+        </div>
+    </div>
 
-        <!-- ---- CONTINUAR ASSISTINDO ---- -->
-        <section id="continue-section" class="rail hidden">
-            <h2 class="rail-title">Continuar assistindo</h2>
-            <div id="continue-list" class="rail-track" data-nav-group="continue">
-                <!-- cards injetados por app.js -->
-            </div>
-        </section>
+    <!-- ================= BIBLIOTECA ================= -->
+    <div id="screen-catalog" class="screen">
+        <div id="cat-scroll" class="cat-scroll">
+            <section class="cat-filters" aria-label="Filtros">
+                <h1 class="cat-h">Biblioteca</h1>
+                <div class="chips" data-nav-group="chips">
+                    <button class="chip focusable" data-kind="all">Tudo</button>
+                    <button class="chip focusable" data-kind="serie">Séries</button>
+                    <button class="chip focusable" data-kind="anime">Animes</button>
+                    <button class="chip focusable" data-kind="filme">Filmes</button>
+                    <span class="chip-sep" aria-hidden="true"></span>
+                    <button class="chip focusable" data-state="andamento">Em andamento</button>
+                    <button class="chip focusable" data-state="novas">Não começadas</button>
+                    <button class="chip chip-sort focusable" data-sort="recent"></button>
+                </div>
+            </section>
+            <div id="cat-grid" class="cat-grid" data-nav-group="catalog"></div>
+            <p id="cat-empty" class="cat-empty" hidden>Nenhum título com esses filtros.</p>
+        </div>
+    </div>
 
-        <!-- ---- NAVEGACAO DE ARQUIVOS ---- -->
-        <section id="browser-section" class="browser">
-            <div class="browser-topbar">
-                <h2 class="rail-title">Navegacao de arquivos</h2>
-                <nav id="breadcrumb" class="breadcrumb" aria-label="Caminho atual"></nav>
-            </div>
-
-            <ul id="file-list" class="file-list" data-nav-group="files">
-                <li class="file-row empty">Nenhum dispositivo montado.</li>
+    <!-- ================= PASTAS ================= -->
+    <div id="screen-folders" class="screen">
+        <nav id="breadcrumb" class="breadcrumb" aria-label="Caminho atual"></nav>
+        <div id="fl-scroll" class="fl-scroll">
+            <ul id="file-list" class="fl-grid" data-nav-group="files">
+                <li class="fl-empty">Nenhum dispositivo montado.</li>
             </ul>
-        </section>
-
+        </div>
         <footer class="hint-bar">
-            <span class="hint"><b class="key key-ok">OK</b>abrir</span>
-            <span class="hint"><b class="key key-ok">OK</b>segurar: opcoes</span>
-            <span class="hint"><b class="key key-return">RETURN</b>voltar</span>
-            <span id="refresh-hint" class="hint"><b class="key key-red">VERMELHO</b>reescanear &bull; <b class="key key-blue">AZUL</b>status da rede &bull; <b class="key key-green">VERDE</b>debug</span>
+            <span class="hint"><b class="key">OK</b>abrir</span>
+            <span class="hint"><b class="key">RETURN</b>pasta anterior</span>
+            <span class="hint"><b class="key key-red">VERMELHO</b>procurar o HD de novo</span>
+            <span class="hint hint-dim"><b class="key key-blue">AZUL</b>rede · <b class="key key-green">VERDE</b>debug</span>
         </footer>
+    </div>
+
+    <!-- ================= SEM HD ================= -->
+    <div id="screen-nohd" class="screen">
+        <section class="nohd" aria-label="HD desconectado">
+            <div class="nohd-ic" id="nohd-ic"></div>
+            <h1 id="nohd-title" class="nohd-title">Conecte o HD</h1>
+            <p id="nohd-text" class="nohd-text"></p>
+            <div data-nav-group="nohd"><button id="nohd-retry" class="btn btn-primary focusable">Procurar de novo</button></div>
+            <span class="nohd-hint">ou aperte <b class="key key-red">VERMELHO</b> no controle</span>
+        </section>
+    </div>
+
+    <!-- ================= OPCOES (segurar OK) ================= -->
+    <div id="options" class="options" hidden>
+        <section class="options-box" role="dialog">
+            <div class="options-head">
+                <div class="options-art"><img id="options-img" class="art-img" alt=""><div class="c16-bar"><i id="options-fill"></i></div></div>
+                <div class="options-info">
+                    <span id="options-title" class="options-title"></span>
+                    <span id="options-sub" class="options-sub"></span>
+                </div>
+            </div>
+            <div id="options-list" class="options-list" data-nav-group="options"></div>
+            <span class="options-hint">▲ ▼ escolher · OK confirmar · RETURN fechar</span>
+        </section>
     </div>
 
     <!-- Status/progresso de recebimento de arquivo pela rede (nao-modal,
@@ -196,16 +292,6 @@
     <!-- Aviso curto (UI.toast) - fora das telas p/ aparecer na inicial e no player -->
     <div id="app-toast" class="app-toast" hidden></div>
 
-    <!-- Menu de contexto (segurar OK num item de "Continuar assistindo") -->
-    <div id="ctx-menu" class="ctx-menu" hidden>
-        <div id="ctx-title" class="ctx-title"></div>
-        <div class="ctx-actions" data-nav-group="ctx">
-            <button id="ctx-play"   class="pc-btn focusable">Assistir</button>
-            <button id="ctx-remove" class="pc-btn focusable">Remover da lista</button>
-            <button id="ctx-cancel" class="pc-btn focusable">Cancelar</button>
-        </div>
-    </div>
-
     <!-- Console de debug na tela (tecla VERDE) -->
     <pre id="dbg" class="dbg" hidden></pre>
 
@@ -217,5 +303,10 @@
     <script src="app.js"></script>
     <script src="js/library.js"></script>
     <script src="js/player-ui.js"></script>
+    <script src="js/screens/common.js"></script>
+    <script src="js/screens/home.js"></script>
+    <script src="js/screens/series.js"></script>
+    <script src="js/screens/catalog.js"></script>
+    <script src="js/screens/folders.js"></script>
 </body>
 </html>

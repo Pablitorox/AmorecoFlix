@@ -27,7 +27,7 @@ http.createServer((req, res) => {
     // ---- HD real (somente leitura) ----
     if (f === 'hd/stat' || f === 'hd/list') {
         const p = inside(HD, u.searchParams.get('p') || '');
-        if (!p || !fs.existsSync(p)) { return send(res, 404, 'null', types['.json']); }
+        if (!p || !fs.existsSync(p)) { return send(res, 200, 'null', types['.json']); }   // "nao existe" sem erro no console
         const st = fs.statSync(p);
         if (f === 'hd/stat') {
             return send(res, 200, JSON.stringify({ isDir: st.isDirectory(), size: st.size, mtime: st.mtimeMs }), types['.json']);

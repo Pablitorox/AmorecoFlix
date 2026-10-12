@@ -20,9 +20,19 @@
 
 var Screens = (function () {
 
-    var defs = {}, stack = [], cur = null, curParams = null;
+    var defs = {}, stack = [], cur = null, curParams = null, showListeners = [];
 
     function register(name, def) { defs[name] = def; }
+    function onShow(fn) { showListeners.push(fn); }
+
+    /* algo mudou (HD lido de novo, progresso, metadados): a tela atual se
+       redesenha, se souber (def.refresh), mantendo o foco */
+    function refresh(why) {
+        var d = cur && defs[cur];
+        if (d && d.refresh) {
+            try { d.refresh(why); } catch (e) { console.error('[screens] refresh ' + cur + ':', e && e.message); }
+        }
+    }
 
     function show(name, params, isBack) {
         var def = defs[name];
@@ -33,6 +43,7 @@ var Screens = (function () {
         }
         cur = name;
         curParams = params || {};
+        showListeners.forEach(function (fn) { fn(name); });
         if (def.enter) { def.enter(curParams, !!isBack); }
     }
 
@@ -60,14 +71,22 @@ var Screens = (function () {
         show(name, {}, true);
     }
 
+    /* abre 'name' como raiz (esvazia a pilha): HD saiu/voltou, etc. */
+    function reset(name, params) {
+        stack = [];
+        show(name, params || {}, false);
+    }
+
     function onKey(code, ev) {
         var d = cur && defs[cur];
         return !!(d && d.onKey && d.onKey(code, ev));
     }
 
     return {
-        register: register, go: go, back: back, backTo: backTo, onKey: onKey,
+        register: register, go: go, back: back, backTo: backTo, reset: reset, onKey: onKey,
+        refresh: refresh, onShow: onShow,
         current: function () { return cur; },
+        params: function () { return curParams; },
         depth: function () { return stack.length; }
     };
 })();

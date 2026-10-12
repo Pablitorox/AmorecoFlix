@@ -1230,7 +1230,7 @@ var ProgressStore = (function () {
                         ' itens, ' + newerLocal + ' mais novos no cache local');
             if (newerLocal) { dirty = true; flush(); }
             else if (window.DebugLog) { DebugLog.persist(); }   // log do boot vai pro HD
-            if (window.UI && UI.renderContinue) { UI.renderContinue(); }
+            if (window.Screens) { Screens.refresh('progress'); }
         }
         function parse(txt) {
             try { var o = JSON.parse(txt); return (o && typeof o === 'object') ? o : null; }
@@ -1706,7 +1706,7 @@ var ThumbsFolder = (function () {
             }
             console.log('[thumbs] indexado:', Object.keys(map).length, 'capas em /thumbs');
             loading = false;
-            if (window.UI && UI.refreshThumbs) { UI.refreshThumbs(); }
+            if (window.Screens) { Screens.refresh('thumbs'); }
         }, function (e) {
             console.warn('[thumbs] erro ao ler /thumbs:', e && e.message);
             map = {}; loading = false;
@@ -1839,34 +1839,23 @@ var SubsFolder = (function () {
 
 
 /* ============================================================================
- * 5. UI  (renderizacao das duas areas: Continuar Assistindo + Navegacao)
+ * 5. UI  (helpers de nome/episodio, spinner e aviso curto - as telas ficam
+ *    em js/screens/*.js e o player em js/player-ui.js)
  * ==========================================================================*/
 
 var UI = (function () {
 
     var el = {
-        usbStatus:   document.getElementById('usb-status'),
-        continueSec: document.getElementById('continue-section'),
-        continueList:document.getElementById('continue-list'),
-        breadcrumb:  document.getElementById('breadcrumb'),
-        fileList:    document.getElementById('file-list'),
-        homeScreen:  document.getElementById('home-screen'),
         playerScreen:document.getElementById('player-screen'),
         spinner:     document.getElementById('spinner')
     };
 
+    /* status do HD na barra do topo (cls: 'ok' | 'error' | '') */
     function setUsbStatus(text, cls) {
-        el.usbStatus.textContent = text;
-        el.usbStatus.className = 'usb-status' + (cls ? ' ' + cls : '');
+        if (window.Topbar) { Topbar.setHd(text, cls); }
     }
 
     function validDur(ms) { return ms > 0 && ms < 4294967000; }
-
-    function hashHue(s) {
-        var h = 0;
-        for (var i = 0; i < s.length; i++) { h = (h * 31 + s.charCodeAt(i)) | 0; }
-        return Math.abs(h) % 360;
-    }
 
     /* extrai temporada/episodio do nome do arquivo */
     function epInfo(name) {
@@ -1919,56 +1908,6 @@ var UI = (function () {
         return s || raw;
     }
 
-    /* monta um card unificado (usado nos trilhos e na grade) */
-    function buildCard(opt) {
-        // opt: { path, index, isDir, title, sub, thumbUrl, glyph, badge,
-        //        watched, progressPct, onActivate, extraClass }
-        var li = document.createElement(opt.li ? 'li' : 'div');
-        li.className = 'card ' + (opt.isDir ? 'is-dir' : 'is-file') +
-                       (opt.watched ? ' watched' : '') +
-                       (opt.extraClass ? ' ' + opt.extraClass : '') + ' focusable';
-        li.tabIndex = 0;
-        if (opt.path  != null) { li.dataset.path  = opt.path; }
-        if (opt.index != null) { li.dataset.index = opt.index; }
-
-        var hue = hashHue(opt.title || 'x');
-        var artStyle = opt.isDir ? '' :
-            'background:linear-gradient(150deg,hsl(' + hue + ',34%,24%),hsl(' +
-            ((hue + 40) % 360) + ',30%,12%))';
-
-        var inner = '<div class="art" style="' + artStyle + '">';
-        inner += '<img class="art-img" alt="">';
-        inner += '<span class="art-glyph">' + (opt.glyph ||
-                 (opt.isDir ? '&#128193;' : '&#127916;')) + '</span>';
-        if (opt.badge)  { inner += '<span class="art-badge">' + escapeHtml(opt.badge) + '</span>'; }
-        if (opt.watched){ inner += '<span class="art-check">&#10003;</span>'; }
-        if (opt.progressPct > 0) {
-            inner += '<div class="art-bar"><i style="width:' +
-                     Math.max(2, Math.min(100, opt.progressPct)) + '%"></i></div>';
-        }
-        inner += '</div>';
-        inner += '<div class="card-title">' + escapeHtml(opt.title || '') + '</div>';
-        inner += '<div class="card-sub">' + (opt.sub || '') + '</div>';
-        li.innerHTML = inner;
-
-        if (opt.thumbUrl) { setThumb(li.querySelector('.art-img'), opt.thumbUrl, opt.isDir); }
-        li.addEventListener('click', opt.onActivate);
-        return li;
-    }
-
-    function setThumb(img, uri, isDirThumb) {
-        if (!img || !uri || img.getAttribute('src')) { return; }
-        img.onload  = function () {
-            img.classList.add('loaded');
-            /* pasta com capa real: o card acompanha o formato natural da capa
-               (geralmente retrato) em vez do 16:9 forcado - sem precisar de
-               fundo desfocado pra preencher */
-            if (isDirThumb && img.parentElement) { img.parentElement.classList.add('poster-thumb'); }
-        };
-        img.onerror = function () { img.classList.remove('loaded'); img.removeAttribute('src'); };
-        img.src = uri;
-    }
-
     /* nome da serie a partir do caminho do arquivo (pasta pai = "Serie - N Temporada").
        Usado tanto no titulo do player (guessShow) quanto pra agrupar o
        "Continuar assistindo" por serie, ignorando a temporada. */
@@ -2000,165 +1939,6 @@ var UI = (function () {
         return out;
     }
 
-    /* --- Continuar assistindo (trilho) --- */
-    function renderContinue() {
-        var items;
-        try { items = dedupeContinueBySeries(ProgressStore.continueList()).slice(0, 12); }
-        catch (e) { console.error('[continue] erro:', e && e.message); items = []; }
-        console.log('[continue] itens em progresso:', items.length);
-        el.continueList.innerHTML = '';
-        if (!items.length) { el.continueSec.classList.add('hidden'); return; }
-        el.continueSec.classList.remove('hidden');
-
-        items.forEach(function (r) {
-            var pct = validDur(r.duration) ? Math.round((r.position / r.duration) * 100) : 0;
-            var cx  = ContentIndex.get(r.path);
-            var tc  = Thumbs.get(r.path);
-            var phrase = epPhrase(r.name);
-            var left = validDur(r.duration)
-                ? fmtTime(r.duration - r.position) + ' restantes'
-                : (phrase || 'continuar');
-            var card = buildCard({
-                path: r.path,
-                title: (cx && cx.title) || cleanName(r.name),
-                sub: left,
-                thumbUrl: ThumbsFolder.get(baseName(r.path)) ||
-                          (tc && tc.u) || (cx && cx.thumb) || null,
-                badge: epLabel(r.name),
-                progressPct: pct,
-                extraClass: 'is-continue',
-                onActivate: function () { openVideoByPath(r.path, r.position); }
-            });
-            card.setAttribute('data-hold', '');
-            card._onHold = function () { ContextMenu.open(r.path); };
-            el.continueList.appendChild(card);
-        });
-    }
-
-    /* --- Breadcrumb --- */
-    function renderBreadcrumb() {
-        var parts = App.dirStack.concat(App.currentDir ? [App.currentDir] : []);
-        el.breadcrumb.innerHTML = parts.map(function (d, i) {
-            var last = (i === parts.length - 1);
-            var label = d.name || d.path || 'USB';
-            return '<span class="crumb' + (last ? ' current' : '') + '">' +
-                   escapeHtml(label) + '</span>' +
-                   (last ? '' : '<span class="sep">&rsaquo;</span>');
-        }).join('');
-    }
-
-    /* --- Grade de arquivos --- */
-    function renderFileList(entries) {
-        el.fileList.innerHTML = '';
-        if (!entries.length) {
-            el.fileList.innerHTML = '<li class="empty">Pasta vazia.</li>';
-            return;
-        }
-        var dirName_ = App.currentDir && App.currentDir.name;
-        entries.forEach(function (e, i) {
-            var isDir = e.isDir;
-            var rec   = isDir ? null : ProgressStore.get(e.file.fullPath);
-            var cx    = ContentIndex.get(isDir ? '' : e.file.fullPath);
-            var th    = isDir ? ThumbsFolder.get(e.name)
-                              : (ThumbsFolder.get(e.name) ||
-                                 Thumbs.quick(e, App.dirImages, dirName_));
-            var tcache= isDir ? null : Thumbs.get(e.file.fullPath);
-
-            var durMs = 0;
-            if (tcache && validDur(tcache.d)) { durMs = tcache.d; }
-            else if (rec && validDur(rec.duration)) { durMs = rec.duration; }
-            else if (cx && validDur(cx.duration)) { durMs = cx.duration; }
-
-            var phrase = isDir ? null : epPhrase(e.name);
-            var pct = 0, sub;
-            if (isDir) { sub = ''; }
-            else if (rec && rec.done) { sub = 'Assistido' + (phrase ? ' • ' + phrase : ''); }
-            else if (rec && rec.position > 3000 && validDur(rec.duration)) {
-                pct = Math.round((rec.position / rec.duration) * 100);
-                sub = 'Continuar • ' + fmtTime(rec.duration - rec.position) + ' restantes';
-            }
-            else if (phrase) { sub = phrase; }
-            else if (durMs) { sub = fmtTime(durMs); }
-            else if (e.size) { sub = fmtSize(e.size); }
-            else { sub = ''; }
-
-            // badge no canto: duracao (filme) ou T1E2 (episodio)
-            var epl = isDir ? null : epLabel(e.name);
-            var badge = isDir ? null : (epl || (durMs ? fmtTime(durMs) : null));
-
-            var title = isDir ? e.name
-                      : (cx && cx.title ? cx.title : cleanName(e.name));
-
-            var li = buildCard({
-                li: true, index: i, isDir: isDir,
-                path: e.file.fullPath,
-                title: title,
-                sub: sub,
-                thumbUrl: th,
-                badge: badge,
-                watched: !!(rec && rec.done),
-                progressPct: pct,
-                onActivate: function () { onEntryActivate(i); }
-            });
-            el.fileList.appendChild(li);
-        });
-    }
-
-    function findByPath(container, path) {
-        var list = container.querySelectorAll('.card'), i;
-        for (i = 0; i < list.length; i++) {
-            if (list[i].dataset.path === path) { return list[i]; }
-        }
-        return null;
-    }
-
-    /* resultado tardio (miniatura de capa / duracao) -> atualiza o card */
-    function applyThumb(path, r) {
-        if (!r) { return; }
-        [findByPath(el.fileList, path), findByPath(el.continueList, path)]
-        .forEach(function (card) {
-            if (!card) { return; }
-            if (r.u) { setThumb(card.querySelector('.art-img'), r.u); }
-            if (validDur(r.d) && !card.querySelector('.art-badge') && !card.classList.contains('is-dir')) {
-                var b = document.createElement('span');
-                b.className = 'art-badge'; b.textContent = fmtTime(r.d);
-                card.querySelector('.art').appendChild(b);
-            }
-        });
-    }
-
-    function decorateCards() {
-        var cards = el.fileList.querySelectorAll('.card.is-file');
-        Array.prototype.forEach.call(cards, function (card) {
-            var cx = ContentIndex.get(card.dataset.path);
-            if (cx && validDur(cx.duration) && !card.querySelector('.art-badge')) {
-                var b = document.createElement('span');
-                b.className = 'art-badge'; b.textContent = fmtTime(cx.duration);
-                card.querySelector('.art').appendChild(b);
-            }
-        });
-    }
-
-    /* a pasta /thumbs terminou de indexar -> aplica capa nos cards visiveis */
-    function refreshThumbs() {
-        var all = document.querySelectorAll('.card');
-        var n = 0;
-        Array.prototype.forEach.call(all, function (card) {
-            var img = card.querySelector('.art-img');
-            if (!img || img.classList.contains('loaded')) { return; }
-            // pasta -> capa da serie pelo nome da pasta; arquivo -> pelo nome do arquivo
-            var uri = ThumbsFolder.get(baseName(card.dataset.path));
-            if (uri) { setThumb(img, uri, card.classList.contains('is-dir')); n++; }
-        });
-        console.log('[thumbs] refresh aplicou', n, 'capas');
-    }
-
-    /* chamado ao voltar para a tela inicial (Screens 'home', enter com isBack) */
-    function showHome() {
-        renderContinue();
-        renderFileList(App.dirFiles);
-        Nav.focusFirst('files');
-    }
     function showSpinner(on) { el.spinner.classList.toggle('hidden', !on); }
 
     /* aviso curto: elemento proprio (#app-toast), fora das telas - nao mexe
@@ -2172,13 +1952,10 @@ var UI = (function () {
     }
 
     return {
-        setUsbStatus: setUsbStatus, renderContinue: renderContinue,
-        renderBreadcrumb: renderBreadcrumb, renderFileList: renderFileList,
-        decorateCards: decorateCards, applyThumb: applyThumb,
-        refreshThumbs: refreshThumbs,
-        cleanName: cleanName, epLabel: epLabel, epInfo: epInfo,
-        seriesNameFromPath: seriesNameFromPath,
-        showHome: showHome, showSpinner: showSpinner, toast: toast, el: el
+        setUsbStatus: setUsbStatus, validDur: validDur,
+        cleanName: cleanName, epLabel: epLabel, epInfo: epInfo, epPhrase: epPhrase,
+        seriesNameFromPath: seriesNameFromPath, dedupeContinueBySeries: dedupeContinueBySeries,
+        showSpinner: showSpinner, toast: toast, el: el
     };
 })();
 
@@ -2187,10 +1964,6 @@ var UI = (function () {
  * 6. NAVEGACAO POR CONTROLE REMOTO (D-pad)
  *    Motor de foco em js/nav.js; aqui so os grupos desta tela.
  * ==========================================================================*/
-
-Nav.define('continue', { type: 'rail', down: 'files' });
-Nav.define('files',    { type: 'grid', up: 'continue' });
-Nav.define('ctx',      { type: 'row' });
 
 
 /* ---------------------------------------------------------------------------
@@ -2228,27 +2001,6 @@ function onKeyUp(ev) {
     if (ev.keyCode === KEY.ENTER) { Nav.okUp(); }     // toque curto num card com data-hold
 }
 
-/* ---------------- TELA INICIAL (Continuar assistindo + pastas) ---------------- */
-function homeKeys(code) {
-    switch (code) {
-        case KEY.LEFT:  Nav.move('left');  break;
-        case KEY.RIGHT: Nav.move('right'); break;
-        case KEY.UP:    Nav.move('up');    break;
-        case KEY.DOWN:  Nav.move('down');  break;
-        case KEY.ENTER: Nav.okDown();      break;   // segurar OK no Continuar = opcoes
-        case KEY.STOP:
-        case KEY.RETURN: goUpDirectory();  break;
-        case KEY.RED:   scanUsb();         break;
-        case KEY.BLUE:  NetUpload.toggleStatus(); break;
-    }
-    return true;
-}
-
-Screens.register('home', {
-    el: document.getElementById('home-screen'),
-    enter: function (params, isBack) { if (isBack) { UI.showHome(); } },
-    onKey: homeKeys
-});
 
 /* ============================================================================
  * 7. FLUXO PRINCIPAL
@@ -2268,7 +2020,7 @@ function boot() {
 
     // ao focar um card de video sem miniatura, gera a dele com prioridade
     var focusTimer = null;
-    UI.el.fileList.addEventListener('focus', function (ev) {
+    document.getElementById('file-list').addEventListener('focus', function (ev) {
         var card = ev.target;
         if (!card.classList || !card.classList.contains('is-file')) { return; }
         clearTimeout(focusTimer);
@@ -2277,7 +2029,7 @@ function boot() {
             if (e && !e.isDir) {
                 var c = Thumbs.get(e.file.fullPath);
                 if (!c || !c.d) {
-                    Thumbs.probeDuration(e, function (r) { UI.applyThumb(e.file.fullPath, r); });
+                    Thumbs.probeDuration(e, function (r) { Folders.applyThumb(e.file.fullPath, r); });
                 }
             }
         }, 400);
@@ -2300,18 +2052,21 @@ function boot() {
         });
     }
 
-    UI.renderContinue();
-    ContentIndex.query(function () { UI.renderContinue(); });
+    ContentIndex.query(function () { Screens.refresh('content'); });
     scanUsb();
     NetUpload.startAutoConnect();
 }
 
 function scanUsb() {
-    UI.setUsbStatus('Procurando HD USB...');
+    UI.setUsbStatus('Procurando o HD...', '');
     mapUsb(function (storages) {
         if (!storages.length) {
-            UI.setUsbStatus('Nenhum HD USB detectado. Conecte e pressione VERMELHO.', 'error');
-            UI.renderFileList([]);
+            UI.setUsbStatus('Nenhum HD', 'error');
+            App.libraryDir = null;
+            App.currentDir = null;
+            App.dirFiles = [];
+            Folders.render([]);
+            NoHD.show('hd');
             return;
         }
         resolveStorage(storages[0].label, function (rootDir) {
@@ -2327,9 +2082,8 @@ function scanUsb() {
                 }
                 var base = lib || rootDir;
                 App.libraryDir = base;
-                UI.setUsbStatus(lib ? ('Biblioteca: ' + LIBRARY_DIR)
-                                    : ('Pasta "' + LIBRARY_DIR + '" nao encontrada no HD.'),
-                                lib ? 'ok' : 'error');
+                if (lib) { UI.setUsbStatus('HD conectado', 'ok'); }
+                else     { UI.setUsbStatus('Sem a pasta ' + LIBRARY_DIR, 'error'); }
                 ThumbsFolder.load(base, true);      // true = reindexa (capas/legendas/skip novos)
                 SkipData.load(base, true);
                 Meta.load(base, true);
@@ -2337,39 +2091,38 @@ function scanUsb() {
                 SubsFolder.load(base, true);
                 ProgressStore.loadFromDisk(base);
                 enterDirectory(base);
+                if (lib) { NoHD.hide(); } else { NoHD.show('pasta'); }
             }, function (err) {
-                UI.setUsbStatus('Falha ao ler o HD: ' + (err && err.message), 'error');
+                UI.setUsbStatus('Falha ao ler o HD', 'error');
+                console.error('[USB] listFiles:', err && err.message);
             });
         }, function (err) {
-            UI.setUsbStatus('Falha ao abrir o HD: ' + (err && err.message), 'error');
+            UI.setUsbStatus('Falha ao abrir o HD', 'error');
+            console.error('[USB] resolve:', err && err.message);
         });
     });
 }
 
-function enterDirectory(dir) {
+/* entra numa pasta (tela Pastas). focusName = item a focar (a pasta de onde
+   voltou), senao o primeiro */
+function enterDirectory(dir, focusName) {
     App.currentDir = dir;
-    UI.renderBreadcrumb();
+    Folders.renderBreadcrumb();
     listDirectory(dir, function (entries, images, subs) {
         App.dirFiles  = entries;
         App.dirImages = images || [];
         App.dirSubs   = subs || {};
-        UI.renderFileList(entries);
-        // reescaneio (USB/NetUpload) durante o video: atualiza a grade, mas
-        // nao rouba o foco do player
-        if (!isPlayerActive()) { Nav.focusFirst('files'); }
+        Folders.render(entries, focusName);
 
         // titulos/duracao do indice da TV (thumb geralmente vem null, sem problema)
-        ContentIndex.query(function () {
-            UI.decorateCards();
-            UI.renderContinue();
-        });
+        ContentIndex.query(function () { Folders.decorate(); });
 
         // duracao das primeiras faixas (a miniatura de video da preto nessa TV)
         entries.filter(function (e) { return !e.isDir; }).slice(0, 10)
             .forEach(function (e) {
                 var c = Thumbs.get(e.file.fullPath);
                 if (!c || !c.d) {
-                    Thumbs.probeDuration(e, function (r) { UI.applyThumb(e.file.fullPath, r); });
+                    Thumbs.probeDuration(e, function (r) { Folders.applyThumb(e.file.fullPath, r); });
                 }
             });
     });
@@ -2387,11 +2140,12 @@ function onEntryActivate(index) {
     }
 }
 
+/* RETURN nas Pastas: sobe uma pasta (false = ja esta na raiz da biblioteca) */
 function goUpDirectory() {
-    if (App.dirStack.length) {
-        var parent = App.dirStack.pop();
-        enterDirectory(parent);
-    }
+    if (!App.dirStack.length) { return false; }
+    var from = App.currentDir && App.currentDir.name;
+    enterDirectory(App.dirStack.pop(), from);
+    return true;
 }
 
 /* --- abertura de video --- */
@@ -2516,77 +2270,12 @@ function stopAndGoHome() {
     Player.stop(true);
     goHome();
 }
+/* sai do player: volta para a tela de onde veio (serie, Inicio, Pastas) */
 function goHome() {
     PlayerUI.hideNext();
-    Nav.setGroup('files');
-    Screens.backTo('home');
+    if (!Screens.back()) { Screens.reset('home'); }
     NetUpload.kickReconnect();
 }
-
-/* ============================================================================
- * 7b. MENU DE CONTEXTO  (segurar OK sobre "Continuar assistindo")
- * ==========================================================================*/
-
-var ContextMenu = (function () {
-    var box    = document.getElementById('ctx-menu');
-    var title  = document.getElementById('ctx-title');
-    var bPlay   = document.getElementById('ctx-play');
-    var bRemove = document.getElementById('ctx-remove');
-    var bCancel = document.getElementById('ctx-cancel');
-    var open_   = false;
-
-    function open(path) {
-        var rec = ProgressStore.get(path);
-        if (!rec) { return; }
-        var ep = UI.epLabel(rec.name);
-        title.textContent = UI.cleanName(rec.name) + (ep ? '  •  ' + ep : '');
-        box.hidden = false;
-        open_ = true;
-        Layers.open('ctx');
-
-        bPlay.onclick = function () {
-            close();
-            openVideoByPath(path, rec.position || 0);
-        };
-        bRemove.onclick = function () {
-            ProgressStore.remove(path);
-            close();
-            UI.renderContinue();
-        };
-        bCancel.onclick = close;
-
-        Nav.setGroup('ctx');
-        Nav.focusFirst('ctx');
-    }
-
-    function close() {
-        box.hidden = true;
-        open_ = false;
-        Layers.close('ctx', true);
-        if (document.querySelector('[data-nav-group="continue"] .card')) {
-            Nav.setGroup('continue');
-            Nav.focusFirst('continue');
-        } else {
-            Nav.setGroup('files');
-            Nav.focusFirst('files');
-        }
-    }
-
-    function isOpen() { return open_; }
-
-    Layers.register('ctx', { onKey: function (code) {
-        switch (code) {
-            case KEY.LEFT:  Nav.move('left');  break;
-            case KEY.RIGHT: Nav.move('right'); break;
-            case KEY.ENTER: Nav.activate();    break;
-            case KEY.STOP:
-            case KEY.RETURN: close(); break;
-        }
-    } });
-
-    return { open: open, close: close, isOpen: isOpen };
-})();
-
 
 /* ============================================================================
  * 8. HELPERS
@@ -3030,6 +2719,7 @@ var NetUpload = (function () {
             xferActive = false;
             fileObj = null;
             if (App.currentDir) { enterDirectory(App.currentDir); }
+            if (App.libraryDir) { Library.scan(App.libraryDir); }    // episodio novo entra no Inicio/Biblioteca
         }
 
         /* verifica de verdade o tamanho gravado no disco antes de dizer que
