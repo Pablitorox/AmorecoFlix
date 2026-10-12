@@ -52,6 +52,8 @@ function Get-EnvValue($name) {
     return $null
 }
 $anthropicKey = Get-EnvValue 'ANTHROPIC_API_KEY'
+$geminiKey = Get-EnvValue 'GEMINI_API_KEY'     # alternativa gratuita (Google AI Studio)
+$aiName = if ($anthropicKey) { 'Claude' } elseif ($geminiKey) { 'Gemini' } else { '' }
 
 $ffmpeg = (Get-Command ffmpeg -EA 0).Source
 if (-not $ffmpeg) { $b = Get-ChildItem "$env:LOCALAPPDATA\Microsoft\WinGet\Packages\Gyan.FFmpeg_*" -Recurse -Filter ffmpeg.exe -EA 0 | Select-Object -First 1; if ($b) { $ffmpeg = $b.FullName } }
@@ -86,8 +88,8 @@ if (-not $Headless) {
     $btnArq   = New-Object Windows.Forms.Button; $btnArq.Text = 'Escolher arquivos...'; $btnArq.SetBounds(170, 80, 170, 32)
     $btnLimpa = New-Object Windows.Forms.Button; $btnLimpa.Text = 'Limpar lista'; $btnLimpa.SetBounds(348, 80, 120, 32)
     $chkIA = New-Object Windows.Forms.CheckBox; $chkIA.SetBounds(490, 84, 400, 26)
-    if ($anthropicKey) { $chkIA.Text = 'Revisar com IA (Claude)'; $chkIA.Checked = $true }
-    else { $chkIA.Text = 'Revisar com IA (defina ANTHROPIC_API_KEY no .env)'; $chkIA.Enabled = $false }
+    if ($aiName) { $chkIA.Text = "Revisar com IA ($aiName)"; $chkIA.Checked = $true }
+    else { $chkIA.Text = 'Revisar com IA (defina GEMINI_API_KEY ou ANTHROPIC_API_KEY no .env)'; $chkIA.Enabled = $false }
     $form.Controls.AddRange(@($btnPasta, $btnArq, $btnLimpa, $chkIA))
 
     $lblSerie = New-Object Windows.Forms.Label; $lblSerie.Text = 'Serie na biblioteca:'; $lblSerie.SetBounds(12, 125, 150, 24)
@@ -448,7 +450,7 @@ function Analyze-All($show) {
         } elseif ($miss.Count -eq 0) { Log "Temporada ${s}: completa ($total eps)." }
     }
 
-    if (-not $NoAI -and $anthropicKey -and ($Headless -or $chkIA.Checked)) { Review-WithAI $show }
+    if (-not $NoAI -and $aiName -and ($Headless -or $chkIA.Checked)) { Review-WithAI $show }
     foreach ($it in $script:items) {
         $lvl = if ($it.Action -eq 'skip') { 'PULAR' } else { $it.Status }
         $extra = if ($it.Action -eq 'skip') { $it.SkipReason } else { $it.Action }
@@ -460,7 +462,8 @@ function Analyze-All($show) {
 
 # ---------- IA ----------
 function Review-WithAI($show) {
-    $model = Get-EnvValue 'ANTHROPIC_MODEL'; if (-not $model) { $model = 'claude-sonnet-5-5' }
+    if ($aiName -eq 'Claude') { $model = Get-EnvValue 'ANTHROPIC_MODEL'; if (-not $model) { $model = 'claude-sonnet-5-5' } }
+    else { $model = Get-EnvValue 'GEMINI_MODEL'; if (-not $model) { $model = 'gemini-flash-latest' } }
     $rows = @(foreach ($it in $script:items) {
         if (-not $it.Info) { continue }
         [ordered]@{
@@ -479,13 +482,25 @@ function Review-WithAI($show) {
     $ctx = [ordered]@{ serie = $show; pasta_destino_tem_arquivos = $sb.Files.Count; mediana_tamanho_mb = [int]($sb.MedSize / 1MB); mediana_duracao_min = [int]($sb.MedDur / 60) }
     $sys = 'Voce e o revisor tecnico de um importador de episodios para uma biblioteca de TV (Samsung Tizen, AVPlay). Criterios do dono: so quer episodios DUBLADOS em PT-BR (ou dual audio); prioridade e a qualidade (resolucao/bitrate); arquivo corrompido/truncado/incompleto nao serve; codecs que a TV nao toca (DTS, TrueHD, Xvid antigo, etc.) sao problema. Voce recebe metadados tecnicos (ffprobe) e achados automaticos. Aponte SO problemas reais que os achados automaticos nao cobriram ou que merecem destaque (ex.: duracao incompativel, bitrate anormalmente baixo para a resolucao, audio PT que pode ser so um canal/comentario, episodio duplo, mismatch de nome). Responda APENAS com JSON: {"resumo":"1 frase em pt-BR","itens":[{"ep":"S01E08","nivel":"OK|ATENCAO|BLOQUEAR","motivo":"curto, pt-BR"}]}. Se esta tudo certo, devolva todos como OK.'
     $user = (ConvertTo-Json -InputObject ([ordered]@{ contexto = $ctx; episodios = $rows }) -Depth 6 -Compress)
-    $body = ConvertTo-Json -Depth 8 -InputObject ([ordered]@{ model = $model; max_tokens = 1500; system = $sys; messages = @(@{ role = 'user'; content = $user }) })
-    Log 'Revisando com IA...'; Pump
+    Log "Revisando com IA ($aiName)..."; Pump
     try {
-        $resp = Invoke-RestMethod -Uri 'https://api.anthropic.com/v1/messages' -Method Post `
-            -Headers @{ 'x-api-key' = $anthropicKey; 'anthropic-version' = '2023-06-01' } `
-            -ContentType 'application/json; charset=utf-8' -Body ([Text.Encoding]::UTF8.GetBytes($body)) -TimeoutSec 90
-        $txt = (@($resp.content | Where-Object { $_.type -eq 'text' }) | Select-Object -First 1).text
+        if ($aiName -eq 'Claude') {
+            $body = ConvertTo-Json -Depth 8 -InputObject ([ordered]@{ model = $model; max_tokens = 1500; system = $sys; messages = @(@{ role = 'user'; content = $user }) })
+            $resp = Invoke-RestMethod -Uri 'https://api.anthropic.com/v1/messages' -Method Post `
+                -Headers @{ 'x-api-key' = $anthropicKey; 'anthropic-version' = '2023-06-01' } `
+                -ContentType 'application/json; charset=utf-8' -Body ([Text.Encoding]::UTF8.GetBytes($body)) -TimeoutSec 90
+            $txt = (@($resp.content | Where-Object { $_.type -eq 'text' }) | Select-Object -First 1).text
+        } else {
+            $body = ConvertTo-Json -Depth 8 -InputObject ([ordered]@{
+                systemInstruction = @{ parts = @(@{ text = $sys }) }
+                contents = @(@{ role = 'user'; parts = @(@{ text = $user }) })
+                generationConfig = @{ responseMimeType = 'application/json'; maxOutputTokens = 6000 }
+            })
+            $resp = Invoke-RestMethod -Uri "https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent" -Method Post `
+                -Headers @{ 'x-goog-api-key' = $geminiKey } `
+                -ContentType 'application/json; charset=utf-8' -Body ([Text.Encoding]::UTF8.GetBytes($body)) -TimeoutSec 90
+            $txt = (@($resp.candidates[0].content.parts) | Select-Object -First 1).text
+        }
         if ($txt -notmatch '(?s)\{.*\}') { Log 'IA: resposta sem JSON, ignorada.'; return }
         $r = $matches[0] | ConvertFrom-Json
         if ($r.resumo) { Log "IA: $($r.resumo)" }
@@ -675,7 +690,7 @@ if (-not $Headless) {
 
     foreach ($s in (Library-Shows)) { [void]$cmbSerie.Items.Add($s) }
     if (-not (Test-Path -LiteralPath $HdRoot)) { Log "AVISO: HD ($HdRoot) nao esta conectado." }
-    if ($anthropicKey) { Log 'IA habilitada (ANTHROPIC_API_KEY encontrada no .env).' }
+    if ($aiName) { Log "IA habilitada: $aiName (chave encontrada no .env)." }
     [void]$form.ShowDialog()
 } else {
     $script:tvId = $TvId
