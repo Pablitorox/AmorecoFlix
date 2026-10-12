@@ -4,6 +4,14 @@ Protótipo de referência: https://claude.ai/artifact/V9AxmuAiwkTo2ZcstYXhnw (12
 Base de código: commit `e210a79` (master)
 Escrito em: 12/10/2026
 
+## Andamento (branch `redesign`)
+
+| Fase | Situação |
+|---|---|
+| 0 — Base | ✅ feita (`ad1cf22`), testada no simulador; falta conferir na TV a linha `[css]` do log |
+| 1 — Player | ✅ feita (`2d116ab`), testada no simulador; **falta testar na TV** |
+| 2 a 7 | a fazer |
+
 ---
 
 ## 0. Resumo
