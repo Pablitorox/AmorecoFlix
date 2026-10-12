@@ -189,6 +189,10 @@
             fakeVideo.style.cssText = 'position:fixed;left:0;top:0;width:1920px;height:1080px;z-index:-1;' +
                 'background:#15182A center/cover no-repeat;display:none';
             document.body.appendChild(fakeVideo);
+            // na TV o <object> do AVPlay e o "buraco" do video; aqui seria uma caixa preta por cima
+            var st = document.createElement('style');
+            st.textContent = '#av-player{background:transparent!important}';
+            document.head.appendChild(st);
         }
         var name = decodeURIComponent(String(uri).split('/').pop());
         fakeVideo.style.backgroundImage = REAL ? 'url("' + rawUrl(LIB + '/thumbs/' + name + '.jpg') + '")' : 'none';
