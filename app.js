@@ -552,7 +552,7 @@ var Player = (function () {
             plan.step++;
             reopenCount++;
             if (!resumeListener) {
-                UI.toast(r.dir > 0 ? 'Pulando um trecho com problema do arquivo...' : 'Retomando de outro jeito...');
+                UI.toast(r.dir > 0 ? 'Pulando um trecho com problema do arquivo…' : 'Retomando de outro jeito…');
             }
             loadAvplay(currentUri);            // a tela "Retomando" mostra a nova tentativa
             return;
@@ -657,7 +657,7 @@ var Player = (function () {
                 seekTarget   = 0;
                 if (reopenCount < 2 && started && lastPlayedMs >= 1000) {
                     reopenCount++;
-                    UI.toast('Recuperando a reproducao...');
+                    UI.toast('Recuperando a reprodução…');
                     reopenAt(lastPlayedMs, -1, 'erro do player');   // onde estava TOCANDO
                 } else {
                     UI.toast('Erro ao reproduzir: ' + (err && err.message || err));
@@ -700,7 +700,7 @@ var Player = (function () {
         clearWatchdog();
         watchdog = setTimeout(function () {
             if (!started) {
-                UI.toast('Este arquivo esta demorando (bitrate alto ou codec pesado).');
+                UI.toast('Este arquivo está demorando (bitrate alto ou codec pesado).');
             }
         }, 45000);
 
@@ -720,7 +720,7 @@ var Player = (function () {
             clearWatchdog();
             UI.showSpinner(false);
             console.error('[AVPlay] prepareAsync falhou:', err);
-            UI.toast('Nao foi possivel abrir o video.');
+            UI.toast('Não foi possível abrir o vídeo.');
         });
     }
 
@@ -976,7 +976,7 @@ var Player = (function () {
                     seekTarget   = 0;
                     if (before) { position = before; }
                     UI.showSpinner(false);
-                    UI.toast('Nao consegui ir para esse ponto do video.');
+                    UI.toast('Não consegui ir para esse ponto do vídeo.');
                 });
             } catch (e) { console.error('[AVPlay] seekTo', e && e.message); }
         } else {
@@ -1077,7 +1077,7 @@ var Player = (function () {
         if (stallStep === 0) {
             stallStep = 1;
             console.warn('[Player] video parado em ' + fmtTime(position) + ' (estado ' + avState() + ')');
-            UI.toast('Recuperando a reproducao...');
+            UI.toast('Recuperando a reprodução…');
             try { avplay.play(); } catch (e) {}  // reemite play (seek aqui falha com o player parado)
         } else if (stallStep === 1 && stuck >= 22000) {
             stallStep = 2;
@@ -1088,7 +1088,7 @@ var Player = (function () {
             }
             if (currentUri && reopenCount < 4) {
                 reopenCount++;
-                UI.toast('Recuperando a reproducao...');
+                UI.toast('Recuperando a reprodução…');
                 reopenAt(position, 1, 'travou em ' + fmtTime(position) + ' (estado ' + avState() + ')');
             } else {
                 stallStep = 2.5;              // sem mais reaberturas -> proximo passo desiste
@@ -1096,7 +1096,7 @@ var Player = (function () {
         } else if (stallStep >= 2 && stuck >= 38000) {
             stallStep = 3;
             stopTick();
-            UI.toast('Nao consegui continuar este episodio. Ele ficou salvo em "Continuar assistindo".');
+            UI.toast('Não consegui continuar este episódio. Ele ficou salvo em "Continuar assistindo".');
             stopAndGoHome();
         }
     }
@@ -2058,7 +2058,7 @@ function boot() {
 }
 
 function scanUsb() {
-    UI.setUsbStatus('Procurando o HD...', '');
+    UI.setUsbStatus('Procurando o HD…', '');
     mapUsb(function (storages) {
         if (!storages.length) {
             UI.setUsbStatus('Nenhum HD', 'error');
@@ -2234,7 +2234,7 @@ function openVideoByPath(fullPath, resumeMs) {
             else     { openVideo(pseudo, resumeMs); }
         });
     }, function (err) {
-        UI.toast('Arquivo nao encontrado. O USB foi removido?');
+        UI.toast('Arquivo não encontrado. O HD foi removido?');
     });
 }
 
@@ -2262,7 +2262,7 @@ function playNextEpisode(fromCredits) {
         if (fromCredits === true) { ProgressStore.markComplete(prev); }   // viu ate os creditos
         openVideo(next, savedPosition(next));
     }
-    else { UI.toast('Este e o ultimo episodio da pasta.'); }
+    else { UI.toast('Este é o último episódio.'); }
 }
 
 function stopAndGoHome() {
@@ -2700,7 +2700,7 @@ var NetUpload = (function () {
 
     function handleEnd(msg) {
         if (netTestMode) {
-            setStatus('Teste de rede concluido: ' + fmtSize(received));
+            setStatus('Teste de rede concluído: ' + fmtSize(received));
             reply({ type: 'done', reqId: msg.reqId, actualSize: received, expectedSize: total });
             xferActive = false;
             return;
@@ -2714,7 +2714,7 @@ var NetUpload = (function () {
 
         function finish(actualSize, verifyNote) {
             setProgress(100, fmtSize(expectedTotal) + ' / ' + fmtSize(expectedTotal));
-            setStatus((verifyNote ? verifyNote : 'Concluido: ' + reportedName));
+            setStatus((verifyNote ? verifyNote : 'Concluído: ' + reportedName));
             reply({ type: 'done', reqId: msg.reqId, actualSize: actualSize, expectedSize: expectedTotal });
             xferActive = false;
             fileObj = null;
@@ -2781,7 +2781,7 @@ var NetUpload = (function () {
         }
         if (statusToastOn) { hideToast(); return; }
         kickReconnect();
-        showToast(connected ? 'PC conectado.' : 'Sem conexao com o PC - tentando reconectar...');
+        showToast(connected ? 'PC conectado.' : 'Sem conexão com o PC - tentando reconectar…');
     }
 
     return {
