@@ -98,7 +98,6 @@ var Home = (function () {
             el.play.onclick = function () { Topbar.open('folders'); };
             el.info.hidden = true;
             Art.set(el.img, null);
-            el.img.removeAttribute('src');
             return;
         }
         var t = hero.t, name = nameOf(t, hero.path), m = t ? Meta.title(t.key) : null;

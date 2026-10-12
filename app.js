@@ -2235,6 +2235,8 @@ function findExtSubs(videoName) {
 
 /* Reabre pelo path salvo (usado na aba Continuar Assistindo). */
 function openVideoByPath(fullPath, resumeMs) {
+    // card desenhado antes do HD ser achado tem o caminho relativo a biblioteca
+    if (fullPath && fullPath.charAt(0) !== '/') { fullPath = libFull(fullPath); }
     // tenta achar na playlist atual; senao resolve direto pelo caminho
     var dirVideos = App.dirFiles.filter(function (e) { return !e.isDir; });
     var inList = dirVideos.filter(function (e) {
@@ -2293,10 +2295,11 @@ function stopAndGoHome() {
     Player.stop(true);
     goHome();
 }
-/* sai do player: volta para a tela de onde veio (serie, Inicio, Pastas) */
+/* sai do player: volta para a tela de onde veio (serie, Inicio, Pastas) -
+   ou para "Conecte o HD", se o HD saiu durante o video */
 function goHome() {
     PlayerUI.hideNext();
-    if (!Screens.back()) { Screens.reset('home'); }
+    if (!NoHD.afterPlayer() && !Screens.back()) { Screens.reset('home'); }
     NetUpload.kickReconnect();
 }
 

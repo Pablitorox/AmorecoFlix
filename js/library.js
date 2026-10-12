@@ -78,11 +78,32 @@ var Library = (function () {
     var CACHE_KEY = 'amorecoflix.library.v1';
     var titles = [], byKey = {};
     var scanning = false, scanned = false, listeners = [];
+    var relative = false;     // titulos do cache: caminhos ainda sem o HD montado na frente
 
+    /* O cache guarda os caminhos RELATIVOS a biblioteca: a TV pode montar o
+       HD com outro nome (outra porta, HD que foi ao PC) e, ate a leitura das
+       pastas terminar, "Proximos" e o destaque apontariam para o caminho velho */
+    function mapPaths(list, fn) {
+        list.forEach(function (t) {
+            t.path = fn(t.path);
+            t.seasons.forEach(function (s) {
+                s.path = fn(s.path);
+                s.eps.forEach(function (e) { e.path = fn(e.path); });
+            });
+        });
+        return list;
+    }
     try {
         var cached = JSON.parse(localStorage.getItem(CACHE_KEY));
-        if (cached && cached.length) { setTitles(cached); }
+        if (cached && cached.length) { setTitles(mapPaths(cached, relPath)); relative = true; }
     } catch (e) {}
+
+    /* HD achado: os titulos do cache ganham o caminho da montagem atual */
+    function rebase(libDir) {
+        if (!relative || !libDir || !libDir.fullPath) { return; }
+        relative = false;
+        mapPaths(titles, function (p) { return p.charAt(0) === '/' ? p : libDir.fullPath + '/' + p; });
+    }
 
     function setTitles(list) {
         titles = list;
@@ -140,6 +161,7 @@ var Library = (function () {
     }
 
     function scan(libDir) {
+        rebase(libDir);
         if (scanning || !libDir || !libDir.fullPath || !window.tizen) { return; }
         scanning = true;
         var t0 = Date.now(), out = [], pending = 0;
@@ -159,7 +181,7 @@ var Library = (function () {
             var nEps = 0;
             out.forEach(function (t) { t.seasons.forEach(function (s) { nEps += s.eps.length; }); });
             console.log('[library] ' + out.length + ' titulos, ' + nEps + ' videos em ' + (Date.now() - t0) + ' ms');
-            try { localStorage.setItem(CACHE_KEY, JSON.stringify(out)); } catch (e) {}
+            try { localStorage.setItem(CACHE_KEY, JSON.stringify(mapPaths(JSON.parse(JSON.stringify(out)), relPath))); } catch (e) {}
             changed('scan');
         }
 

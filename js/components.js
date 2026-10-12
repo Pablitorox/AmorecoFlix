@@ -174,7 +174,13 @@ var Art = (function () {
     /* set(img, url, eager) - eager = carrega ja (destaque, fundo da tela) */
     function set(img, url, eager) {
         if (!img) { return; }
-        if (!url) { img.removeAttribute('data-src'); return; }
+        if (!url) {                       // sem arte: tira a anterior (senao fica a do titulo de antes)
+            if (io) { io.unobserve(img); }
+            img.removeAttribute('data-src');
+            img.removeAttribute('src');
+            img.classList.remove('loaded');
+            return;
+        }
         if (img.getAttribute('data-src') === url && img.getAttribute('src')) { return; }
         img.removeAttribute('src');
         img.classList.remove('loaded');

@@ -149,12 +149,26 @@ var NoHD = (function () {
         document.getElementById('nohd-text').innerHTML = x.p;
     }
 
+    var pending = false;          // o HD saiu durante um video: a tela aparece ao sair do player
+
     function show(reason) {
         fill(reason);
-        if (isPlayerActive()) { UI.toast('O HD foi desconectado.'); return; }
+        if (isPlayerActive()) { pending = true; UI.toast('O HD foi desconectado.'); return; }
         if (Screens.current() !== 'nohd') { Screens.reset('nohd', { reason: reason }); }
     }
-    function hide() { if (Screens.current() === 'nohd') { Screens.reset('home'); } }
+    function hide() {
+        pending = false;
+        if (Screens.current() === 'nohd') { Screens.reset('home'); }
+    }
+
+    /* saindo do player: sem o HD, vai para "Conecte o HD" em vez de voltar
+       para uma tela com a biblioteca antiga (true = ja abriu) */
+    function afterPlayer() {
+        if (!pending) { return false; }
+        pending = false;
+        Screens.reset('nohd');
+        return true;
+    }
 
     document.getElementById('nohd-ic').innerHTML = Icons.svg('hd', 72, 1.6);
     document.getElementById('nohd-retry').onclick = function () { scanUsb(); };
@@ -165,7 +179,7 @@ var NoHD = (function () {
         onKey: function (code) { return screenKeys(code); }
     });
 
-    return { show: show, hide: hide };
+    return { show: show, hide: hide, afterPlayer: afterPlayer };
 })();
 
 
