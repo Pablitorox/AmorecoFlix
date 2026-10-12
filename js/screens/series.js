@@ -165,14 +165,15 @@ var Series = (function () {
         el.seasonBtn.hidden = !multi;
         var s = seasons.filter(function (x) { return x.num === cur.season; })[0] || seasons[0];
         if (s) { cur.season = s.num; }
-        el.seasonBtn.innerHTML = '<span>' + (s ? seasonLabel(s) : '') + '</span>' + Icons.svg('chevDown', 22, 2.2);
+        el.seasonBtn.innerHTML = '<span class="season-arrow">◀</span><span>' + (s ? seasonLabel(s) : '') + '</span>' +
+                                 '<span class="season-arrow">▶</span>' + Icons.svg('chevDown', 22, 2.2);
 
         var p = Library.progressOf(t), curPath = p.current ? p.current.path : null;
         var eps = s ? seasonEps(t, s.num) : [];
         el.rail.innerHTML = '';
         el.rail.style.transform = '';
-        var focusCard = null;
-        eps.forEach(function (ep) {
+        var focusCard = null, focusIdx = 0;
+        eps.forEach(function (ep, i) {
             var r = ProgressStore.get(ep.path), isCur = ep.path === curPath;
             var c = card16({
                 size: 'md', key: ep.path,
@@ -184,10 +185,13 @@ var Series = (function () {
                 onClick: function () { openVideoByPath(ep.path, savedPos(ep.path)); },
                 onHold: function () { epOptions(t, ep); }
             });
-            if (isCur || (!focusCard && p.next && ep.path === p.next.path)) { focusCard = c; }
+            if (isCur || (!focusCard && p.next && ep.path === p.next.path)) { focusCard = c; focusIdx = i; }
             el.rail.appendChild(c);
         });
-        // fileira ja aberta no episodio atual (sem tirar o foco do botao)
+        // ao descer, o foco entra no episodio atual/proximo (ou no 1o), nunca
+        // no indice que a fileira tinha em outra serie/temporada
+        Nav.setLast('series-eps', focusIdx);
+        // fileira ja aberta nele (sem tirar o foco do botao)
         if (focusCard) { setTimeout(function () { scrollRail(focusCard); }, 0); }
         return focusCard;
     }
@@ -250,6 +254,28 @@ var Series = (function () {
 
     function back() { if (!Screens.back()) { Screens.reset('home'); } }
 
+    /* ◀ ▶ no botao de temporada: troca direto (OK abre a lista) */
+    function stepSeason(dir) {
+        var t = Library.get(cur.key);
+        if (!t) { return; }
+        var seasons = seasonsList(t), i = 0;
+        for (var k = 0; k < seasons.length; k++) { if (seasons[k].num === cur.season) { i = k; } }
+        var n = seasons[i + dir];
+        if (!n) { return; }
+        cur.season = n.num;
+        renderInfo(t);
+        renderEps(t);
+        Nav.focusFirst('season');
+    }
+
+    function keys(code) {
+        if (Nav.getGroup() === 'season' && (code === KEY.LEFT || code === KEY.RIGHT)) {
+            stepSeason(code === KEY.LEFT ? -1 : 1);
+            return true;
+        }
+        return screenKeys(code, back);
+    }
+
     el.seasonBtn.onclick = function () { var t = Library.get(cur.key); if (t) { chooseSeason(t); } };
 
     Nav.define('series-actions', { type: 'row',
@@ -275,7 +301,7 @@ var Series = (function () {
         },
         leave: function () { remember(); Art.release(el.rail); },
         refresh: refresh,
-        onKey: function (code) { return screenKeys(code, back); }
+        onKey: keys
     });
 
     return { refresh: refresh };

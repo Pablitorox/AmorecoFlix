@@ -195,12 +195,16 @@ var Nav = (function () {
        podem chegar no menu que acabou de abrir (viraria "Assistir") */
     function holding() { return holdTimer !== null || holdFired; }
 
+    /* define onde o grupo "lembra" estar (ex.: fileira de episodios abre no
+       episodio atual, e nao no indice da serie anterior) */
+    function setLast(g, idx) { last[g] = Math.max(0, idx | 0); }
+
     function setGroup(g) { group = g; }
     function getGroup()  { return group; }
 
     return {
         define: define, items: items, focusFirst: focusFirst, restore: restore, focusIndex: focusIndex,
-        move: move, activate: activate, okDown: okDown, okUp: okUp, holding: holding,
+        move: move, activate: activate, okDown: okDown, okUp: okUp, holding: holding, setLast: setLast,
         setGroup: setGroup, getGroup: getGroup
     };
 })();

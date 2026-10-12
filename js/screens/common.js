@@ -83,6 +83,7 @@ var Options = (function () {
     var title = document.getElementById('options-title');
     var sub   = document.getElementById('options-sub');
     var back  = null;            // { el, group } p/ devolver o foco
+    var openedAt = 0;            // OK repetido logo apos abrir nao escolhe nada
 
     function open(o) {
         back = { el: document.activeElement, group: Nav.getGroup() };
@@ -100,6 +101,7 @@ var Options = (function () {
             list.appendChild(b);
         });
         box.hidden = false;
+        openedAt = Date.now();
         Layers.open('options');
         Nav.focusFirst('options');
     }
@@ -120,7 +122,7 @@ var Options = (function () {
         switch (code) {
             case KEY.UP:    Nav.move('up');   break;
             case KEY.DOWN:  Nav.move('down'); break;
-            case KEY.ENTER: Nav.activate();   break;
+            case KEY.ENTER: if (Date.now() - openedAt > 400) { Nav.activate(); } break;
             case KEY.STOP:
             case KEY.RETURN: close(); break;
         }
