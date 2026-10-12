@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "simulador",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["tools/simulador/serve.js"],
+      "port": 8765
+    }
+  ]
+}

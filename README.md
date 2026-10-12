@@ -16,20 +16,31 @@ um HD USB conectado direto na TV e guarda o progresso ("Continuar assistindo").
 | Arquivo       | Papel |
 |---------------|-------|
 | `config.xml`  | Manifesto Tizen + privilegios (filesystem, content, tv.inputdevice, ...). |
-| `index.html`  | Estrutura: **Continuar assistindo** + **Navegacao de arquivos** + tela do player. |
-| `app.js`      | Logica: `mapUsb()` (tizen.filesystem), `Player` (webapis.avplay + fallback `<video>`), `ProgressStore` (progresso no HD), proximo episodio, NetUpload e navegacao por D-pad. |
-| `style.css`   | Tema escuro, estados `:focus` / `:hover` / `.focused` bem visiveis para o controle. |
+| `index.html`  | Estrutura das telas: Inicio, pagina do titulo, Biblioteca, Pastas, Sem HD, Opcoes e o player. |
+| `app.js`      | Nucleo: `mapUsb()` (tizen.filesystem), `Player` (webapis.avplay + retomada + fallback `<video>`), `ProgressStore` (progresso no HD), capas/legendas/skip, proximo episodio e NetUpload. |
+| `js/nav.js`, `js/router.js` | Foco por D-pad em grupos declarados por tela; pilha de telas (RETURN volta) e camadas (paineis, Opcoes). |
+| `js/components.js` | Icones, card 16:9, imagens com carregamento preguicoso, rolagem por `transform`. |
+| `js/library.js` | `Meta` (le `meta/biblioteca.json`) e `Library` (titulos, temporadas, episodios, progresso por titulo). |
+| `js/player-ui.js` | Interface do player: controles, avanco, pular abertura, proximo episodio, audio e legendas, episodios, Retomando. |
+| `js/screens/*.js` | Inicio, pagina do titulo (`series.js`), Biblioteca (`catalog.js`), Pastas (`folders.js`) e o comum (barra do topo, Opcoes, Sem HD). |
+| `style.css`   | Tokens do design (cores, margens), fontes e todas as telas. |
+| `fonts/`      | Sora (titulos) e Figtree (texto), licenca OFL - embutidas, funcionam offline. |
 | `icon.png`    | Icone do app. |
 
-So esses 5 arquivos entram no pacote (`$AppFiles` no `build.ps1`). Arquivo
-novo do app tem que ser adicionado la.
+So isso entra no pacote (`$AppFiles` no `build.ps1`; pastas entram inteiras).
+O build para se o `index.html`/`style.css` citar um arquivo que ficou de fora.
+
+Prototipo do design: https://claude.ai/artifact/V9AxmuAiwkTo2ZcstYXhnw -
+plano e decisoes em `PLANO-REDESIGN.md`.
 
 ### Scripts do PC
 
 | Script | Papel |
 |--------|-------|
 | `build.ps1` | Monta o app numa pasta temporaria + `build-web` + `package` assinado + (opcional) instala na TV. |
-| `lib.ps1` | Funcoes comuns: `Get-EnvValue`, `Get-TmdbApiKey` (`.env`), `Find-FfTool` (ffmpeg/ffprobe). |
+| `lib.ps1` | Funcoes comuns: `Get-EnvValue`, `Get-TmdbApiKey` (`.env`), `Find-FfTool` (ffmpeg/ffprobe) e as buscas no TMDB (`Find-TmdbTv/Movie/Collection`, `Get-SeasonEpisode`...). |
+| `metadados.ps1` | Sinopse, ano, generos, nota, titulos de episodio e artes do TMDB em `AmorecoFlix/meta/` (`biblioteca.json`, `fundos/`, `posters/`). Incremental; `-Only "Serie"`, `-Force`; correcoes em `meta/ids.json`. Roda sozinho no fim do Importador e do `import-serie.ps1`. |
+| `tools/simulador/` | Roda o app no navegador com a TV falsa (`node tools/simulador/serve.js`; `?hd=real` le o HD sem gravar). Ver `LEIA.txt`. |
 | `Importador.bat` / `importador.ps1` | Janela para passar episodios de Downloads para o HD (analise, copia verificada, legendas, miniaturas, revisao por IA opcional). |
 | `import-serie.ps1` | Mesmo fluxo, por linha de comando. |
 | `checar-compatibilidade.ps1` | Integridade e codecs de risco para a TV (tambem usado como biblioteca pelos importadores). |
@@ -48,7 +59,9 @@ Chaves (TMDB, Gemini/Anthropic) ficam no `.env` (fora do git e do `.wgt`).
    storages `EXTERNAL` / `removable*` no estado `MOUNTED`.
 2. Resolve o primeiro, entra na pasta `AmorecoFlix` e lista pastas + videos
    (`mp4, mkv, avi, mov, ts, ...`), com ordenacao **natural** (`S01E02` antes de `S01E10`).
-   `thumbs/`, `subs/` e `skip.json` sao (re)lidos a cada escaneamento (tecla VERMELHA).
+   `thumbs/`, `subs/`, `skip.json` e `meta/biblioteca.json` sao (re)lidos a
+   cada escaneamento (tecla VERMELHA); a `Library` le as pastas em segundo
+   plano (2 por vez) e guarda um cache para o Inicio aparecer na hora.
 3. Ao abrir um video: `webapis.avplay.open() -> prepareAsync() -> play()`.
    **Retomada** (ponto salvo): nessa TV, pedir o `seekTo()` e chamar `play()`
    sem esperar o seek terminar deixa o player em "PLAYING" **parado** no
@@ -58,7 +71,8 @@ Chaves (TMDB, Gemini/Anthropic) ficam no `.env` (fora do git e do `.wgt`).
    um de dois metodos: **seek antes do play** (`play()` so no callback de
    sucesso do seek / buffer pronto) ou **play antes do seek** (toca, espera
    andar, ai pede o seek). Plano: metodo preferido -> o outro -> o outro 20 s
-   antes -> toca do inicio com aviso (ponto salvo preservado). O metodo que
+   antes -> a tela Retomando pergunta "Comecar do inicio" (sozinho em 5 s) ou
+   "Tentar de novo" (ponto salvo preservado). O metodo que
    funcionar fica memorizado (`resumeMethod` nas preferencias). So conta
    como retomado quando o video ANDA depois de chegar no ponto. Enquanto isso
    nada e gravado. O progresso tambem e salvo a cada evento de posicao (~3 s).
@@ -101,16 +115,33 @@ sem apagar `op`/`ed`. Roda uma vez por episodio (cache em
 Creditos sobre imagem (finais de temporada etc.) nao sao detectados; nesses
 o app usa o padrao `fim - 45 s`.
 
+### Telas
+
+- **Inicio** (abre aqui): destaque fixo com o que voce esta vendo (fundo e
+  sinopse do TMDB), **Continuar assistindo** e **Proximos episodios**.
+- **Pagina do titulo** (serie, anime, filme, colecao): Continuar / Assistir /
+  Assistir de novo, Do inicio, marcar a temporada como vista, seletor de
+  temporada e os episodios com titulo.
+- **Biblioteca**: posteres com filtros (tipo, em andamento, nao comecadas,
+  recem-adicionados) e selo NOVO EP.
+- **Pastas**: a navegacao pelas pastas do HD, com o andamento de cada pasta.
+- **Opcoes** (segurar OK num card): continuar, do inicio, ver episodios,
+  marcar como assistido, tirar de Continuar assistindo (o ponto fica salvo).
+- **Player**: barra com tempo restante e marca de creditos; Episodios e
+  Audio e legendas pausam o video; a escolha de faixa vale por serie; a tela
+  **Retomando** mostra a volta ao ponto salvo e, se falhar, pergunta
+  (Comecar do inicio em 5 s / Tentar de novo).
+
 ### Teclas do controle
 
-| Tecla | Tela inicial | Player |
-|-------|--------------|--------|
-| Direcionais | mover foco | ESQ/DIR = voltar/avancar (segurar acelera, com previa); BAIXO = botoes |
-| OK / Enter | abrir (segurar no Continuar = opcoes) | play / pause; pula abertura / assiste o proximo quando o botao aparece |
+| Tecla | Telas | Player |
+|-------|-------|--------|
+| Direcionais | mover foco (CIMA no topo = abas) | barra: ESQ/DIR voltam/avancam (segurar acelera, com balao); BAIXO = botoes; CIMA = voltar |
+| OK / Enter | abrir; **segurar = Opcoes** | play / pause; pula abertura / assiste o proximo quando o botao aparece |
 | PLAY / PAUSE | - | play / pause |
 | >> / << | - | +85s / -85s |
-| RETURN | subir de pasta | parar e voltar |
-| VERMELHO (A) | reescanear USB | - |
+| RETURN | tela anterior / pasta anterior / Inicio | fecha o painel; senao para e volta para a tela de origem |
+| VERMELHO (A) | procurar o HD de novo | - |
 | VERDE (B) | console de debug | console de debug |
 | AMARELO (C) | - | audio e legendas |
 | AZUL (D) | status da rede / cancelar envio | - |

@@ -1,0 +1,31 @@
+Simulador da TV (AmorecoFlix) - roda o app real no navegador com HD e AVPlay falsos.
+
+  node tools/simulador/serve.js   -> http://localhost:8765/test.html?<parametros>
+  (janela 1920x1080; teclado: setas, Enter = OK, Backspace NAO e RETURN - use as
+   funcoes do console ou mande keyCode 10009)
+  (test-old.html usa app-old.js desta pasta: copie ali o app.js de uma versao antiga/do .wgt)
+
+HD:
+  (padrao)  HD falso em memoria com a serie "Show" (testes de retomada)
+  hd=real   le o HD de verdade (E:\AmorecoFlix, ou a pasta da variavel HD ao iniciar
+            o serve.js). SOMENTE LEITURA: progresso/log que o app grava ficam na memoria
+  hd=0      nenhum HD conectado
+
+Player:
+  tv=h1    play() com o seek em andamento congela   <- bate com o log da TV (Out/2026)
+  tv=h2    qualquer seek no estado READY congela ao dar play
+  tv=h3    qualquer seek com o video tocando congela
+  tv=hall  nenhum seek funciona
+  s=ok|nocb|ignored|slow|error|onerror|stuck|late|lateslow   (outros comportamentos do seek)
+  bad=600-606   trecho do arquivo que congela (segundos)
+  pos=602       ponto salvo do episodio de teste (segundos, so no HD falso)
+  dur=1380      duracao do video (segundos; no hd=real vem do progresso.json)
+  tracks=0      sem faixas de audio/legenda (padrao: 2 audios + forcada + PT + EN)
+  timers=dead   para os timers do app depois do play()
+  mount=B1      nome da montagem do HD (padrao C1)
+
+No hd=real o "video" e o still do episodio (thumbs/<arquivo>.jpg) atras da pagina.
+
+No console da pagina: AV (player falso), FS (HD em memoria), T (eventos/seeks/avisos),
+_st/_si = setTimeout/setInterval reais. Log do app: FS.files['/opt/media/USBDriveC1/AmorecoFlix/amorecoflix.log']
+(chame DebugLog.persist() antes de ler).
