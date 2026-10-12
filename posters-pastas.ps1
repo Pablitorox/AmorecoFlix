@@ -23,7 +23,7 @@ param(
     [string]$ApiUrl = 'http://localhost:8790'
 )
 $ErrorActionPreference = 'Continue'
-. (Join-Path $PSScriptRoot 'tmdb-key.ps1')
+. (Join-Path $PSScriptRoot 'lib.ps1')
 if (-not $ApiKey) { $ApiKey = Get-TmdbApiKey }
 if (-not $ApiKey) { Write-Error "Informe -ApiKey ou crie .env com TMDB_API_KEY=..."; exit 1 }
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12

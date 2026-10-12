@@ -22,11 +22,8 @@ $ANIME_MAL = @{
     # adicione: 'nome da pasta em minusculo' = <mal id>
 }
 
-$ffprobe = (Get-Command ffprobe -EA 0).Source
-if (-not $ffprobe) {
-    $b = Get-ChildItem "$env:LOCALAPPDATA\Microsoft\WinGet\Packages\Gyan.FFmpeg_*" -Recurse -Filter ffprobe.exe -EA 0 | Select-Object -First 1
-    if ($b) { $ffprobe = $b.FullName }
-}
+. (Join-Path $PSScriptRoot 'lib.ps1')
+$ffprobe = Find-FfTool 'ffprobe'
 if (-not $ffprobe) { Write-Error "ffprobe nao encontrado"; exit 1 }
 
 function Norm($s) { ("$s".ToLower() -replace '[^\p{Ll}\p{Nd} ]',' ' -replace '\s+',' ').Trim() }
@@ -56,7 +53,8 @@ foreach ($showDir in (Get-ChildItem -LiteralPath $animes -Directory -EA 0)) {
     foreach ($v in ($vids | Sort-Object Name)) {
         $ep = Get-Ep $v.BaseName
         if ($ep -le 0) { continue }
-        if ($map.ContainsKey($v.Name)) { continue }   # ja tem
+        $cur = $map[$v.Name]
+        if ($cur -and ($cur.op -or $cur.ed)) { continue }   # ja tem (entrada so com "cr" nao conta)
 
         $dur = 0
         try { $dur = [double](& $ffprobe -v error -show_entries format=duration -of csv=p=0 -- "$($v.FullName)" 2>$null) } catch {}
@@ -86,7 +84,12 @@ foreach ($showDir in (Get-ChildItem -LiteralPath $animes -Directory -EA 0)) {
             if ($ok) { $entry[$t] = @([math]::Round($st, 1), [math]::Round($en, 1)) }
         }
         if ($entry.Count -gt 0) {
-            $map[$v.Name] = $entry
+            # mescla com o que ja existe (ex.: "cr" do detectar-creditos.ps1) em vez de substituir
+            $o = [ordered]@{}
+            if ($cur -is [System.Collections.IDictionary]) { foreach ($k in $cur.Keys) { $o[$k] = $cur[$k] } }
+            elseif ($cur) { $cur.PSObject.Properties | ForEach-Object { $o[$_.Name] = $_.Value } }
+            foreach ($k in $entry.Keys) { $o[$k] = $entry[$k] }
+            $map[$v.Name] = $o
             $hit++
             $op = $entry['op']
             Write-Host ("  E{0:D2}  OP {1}-{2}s" -f $ep, $(if($op){$op[0]}else{'-'}), $(if($op){$op[1]}else{'-'}))

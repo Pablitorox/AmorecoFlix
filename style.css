@@ -534,6 +534,13 @@ body.playing #home-screen {
 .next-toast p { color: var(--text-dim); font-size: 20px; }
 .next-toast strong { display: block; font-size: 26px; margin: 10px 0 22px; }
 .next-toast-actions { display: flex; gap: 16px; }
+.next-toast-hint { display: none; margin-top: 16px; font-size: 16px; color: var(--text-dim); }
+
+/* card durante os creditos: sem contagem, so "OK assiste / ▲ oculta" */
+.next-toast.credits .toast-ring,
+.next-toast.credits #btn-toast-cancel { display: none; }
+.next-toast.credits .next-toast-hint { display: block; }
+.next-toast.credits .pc-btn-ring { background: #fff; color: #000; }
 
 .pc-btn-ring { display: flex; align-items: center; gap: 14px; }
 .toast-ring { position: relative; width: 34px; height: 34px; flex: 0 0 34px; }
@@ -562,6 +569,25 @@ body.playing #home-screen {
     font-size: 14px;
     font-weight: 700;
     font-variant-numeric: tabular-nums;
+}
+
+/* ---------- Aviso curto (UI.toast) ----------
+   Fora das telas: aparece tanto na inicial quanto no player, e nao
+   divide elemento com o card de proximo episodio. */
+.app-toast {
+    position: absolute;
+    left: 50%;
+    top: 60px;
+    transform: translateX(-50%);
+    max-width: 1100px;
+    padding: 18px 30px;
+    background: rgba(28,28,28,0.95);
+    border: 1px solid rgba(255,255,255,0.14);
+    border-radius: 10px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+    font-size: 22px;
+    text-align: center;
+    z-index: 80;
 }
 
 /* ---------- Menu de contexto (Continuar assistindo) ---------- */

@@ -13,10 +13,11 @@
   NOTA: o <name> no config.xml NAO pode ter espacos - a TV Samsung recusa a
         instalacao. Use hifen (Meu-Player-USB).
 
-  NOTA: o script de envio de arquivo (enviar-para-tv.js) e suas dependencias
-        (node_modules) ficam em pasta separada, fora daqui:
-        ..\AmorecoFlix-Enviar-Arquivo\  (o build-web -e nao exclui pastas
-        direito nessa versao do Tizen Studio, so arquivos individuais).
+  NOTA: o build roda numa pasta temporaria que recebe SO os arquivos do app
+        ($AppFiles). Antes o build-web empacotava a pasta do projeto inteira
+        (.env com as chaves, .git, scripts .ps1, scratchpad...) e o -e dessa
+        versao do Tizen Studio nao exclui pastas. Arquivo novo do app (ex.:
+        outro .js/.css) tem que entrar em $AppFiles.
 #>
 param(
     [string]$Profile = 'SamsungTV',
@@ -29,20 +30,41 @@ $ErrorActionPreference = 'Stop'
 $env:JAVA_HOME = [Environment]::GetEnvironmentVariable('JAVA_HOME','Machine')
 $env:Path      = [Environment]::GetEnvironmentVariable('Path','Machine') + ';' + $env:Path
 
+# unicos arquivos que vao para dentro do .wgt
+$AppFiles = @('config.xml', 'index.html', 'app.js', 'style.css', 'icon.png')
+
 $proj  = $PSScriptRoot
 $tizen = 'C:\tizen-studio\tools\ide\bin\tizen.bat'
 $sdb   = 'C:\tizen-studio\tools\sdb.exe'
-$build = Join-Path $proj '.buildResult'
+$out   = Join-Path $proj '.buildResult'
+$stage = Join-Path $env:TEMP 'amorecoflix-build'
+
+Write-Host "==> preparando $stage" -ForegroundColor Cyan
+if (Test-Path -LiteralPath $stage) { Remove-Item -LiteralPath $stage -Recurse -Force }
+New-Item -ItemType Directory -Force -Path $stage | Out-Null
+foreach ($f in $AppFiles) {
+    $src = Join-Path $proj $f
+    if (-not (Test-Path -LiteralPath $src)) { throw "arquivo do app ausente: $f" }
+    Copy-Item -LiteralPath $src -Destination $stage
+}
+$build = Join-Path $stage '.buildResult'
 
 Write-Host "==> build-web" -ForegroundColor Cyan
-& cmd /c "`"$tizen`" build-web -- `"$proj`""
+& cmd /c "`"$tizen`" build-web -- `"$stage`""
 if ($LASTEXITCODE) { throw "build-web falhou ($LASTEXITCODE)" }
 
 Write-Host "==> package (perfil: $Profile)" -ForegroundColor Cyan
 & cmd /c "`"$tizen`" package -t wgt -s $Profile -- `"$build`""
 if ($LASTEXITCODE) { throw "package falhou ($LASTEXITCODE)" }
 
-$wgt = Get-ChildItem $build -Filter *.wgt | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+$built = Get-ChildItem $build -Filter *.wgt | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+if (-not $built) { throw "nenhum .wgt gerado em $build" }
+
+# .buildResult do projeto guarda so o .wgt final
+if (Test-Path -LiteralPath $out) { Remove-Item -LiteralPath $out -Recurse -Force }
+New-Item -ItemType Directory -Force -Path $out | Out-Null
+Copy-Item -LiteralPath $built.FullName -Destination $out
+$wgt = Get-Item -LiteralPath (Join-Path $out $built.Name)
 Write-Host "OK: $($wgt.FullName)  ($([math]::Round($wgt.Length/1KB,1)) KB)" -ForegroundColor Green
 
 if ($Install) {
@@ -52,7 +74,7 @@ if ($Install) {
     & $sdb devices | Out-Host
 
     Write-Host "==> tizen install" -ForegroundColor Cyan
-    & cmd /c "`"$tizen`" install -n `"$($wgt.Name)`" -s $serial -- `"$build`""
+    & cmd /c "`"$tizen`" install -n `"$($wgt.Name)`" -s $serial -- `"$out`""
     if ($LASTEXITCODE) { throw "install falhou ($LASTEXITCODE)" }
 
     Write-Host "==> tizen run" -ForegroundColor Cyan

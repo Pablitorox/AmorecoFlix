@@ -1,0 +1,5 @@
+# repositorio e copia de trabalho em LF (evita o aviso "LF will be replaced by CRLF")
+* text=auto eol=lf
+*.bat text eol=crlf
+*.png binary
+*.jpg binary

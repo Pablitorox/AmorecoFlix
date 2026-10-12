@@ -38,27 +38,14 @@ $vext = @('.mkv','.mp4','.avi','.m4v','.ts')
 $sext = @('.srt','.ass','.ssa','.vtt')
 $RANK = @{ 'OK' = 0; 'ATENCAO' = 1; 'BLOQUEIO' = 2 }
 
-. (Join-Path $PSScriptRoot 'tmdb-key.ps1')
+. (Join-Path $PSScriptRoot 'lib.ps1')
 $tmdbKey = Get-TmdbApiKey
-
-function Get-EnvValue($name) {
-    $v = [Environment]::GetEnvironmentVariable($name)
-    if ($v) { return $v }
-    $f = Join-Path $PSScriptRoot '.env'
-    if (Test-Path -LiteralPath $f) {
-        $l = Get-Content -LiteralPath $f -EA 0 | Where-Object { $_ -match ('^\s*' + $name + '\s*=') } | Select-Object -First 1
-        if ($l) { return (($l -split '=', 2)[1]).Trim().Trim('"') }
-    }
-    return $null
-}
 $anthropicKey = Get-EnvValue 'ANTHROPIC_API_KEY'
 $geminiKey = Get-EnvValue 'GEMINI_API_KEY'     # alternativa gratuita (Google AI Studio)
 $aiName = if ($anthropicKey) { 'Claude' } elseif ($geminiKey) { 'Gemini' } else { '' }
 
-$ffmpeg = (Get-Command ffmpeg -EA 0).Source
-if (-not $ffmpeg) { $b = Get-ChildItem "$env:LOCALAPPDATA\Microsoft\WinGet\Packages\Gyan.FFmpeg_*" -Recurse -Filter ffmpeg.exe -EA 0 | Select-Object -First 1; if ($b) { $ffmpeg = $b.FullName } }
-$ffprobe = $null
-if ($ffmpeg) { $ffprobe = Join-Path (Split-Path $ffmpeg) 'ffprobe.exe' }
+$ffmpeg  = Find-FfTool 'ffmpeg'
+$ffprobe = Find-FfTool 'ffprobe'
 $compatLib = Join-Path $PSScriptRoot 'checar-compatibilidade.ps1'
 if (Test-Path -LiteralPath $compatLib) { . $compatLib -AsLibrary }
 
@@ -578,6 +565,96 @@ function Make-SeriesCover($show) {
     } catch { Log "  capa da serie falhou: $($_.Exception.Message)" }
 }
 
+# ---------- versao substituida com outro nome (ex.: .mp4 -> .mkv) ----------
+# legendas (/subs), skip.json e progresso.json sao indexados pelo NOME do
+# arquivo - sem migrar, a versao nova perde legenda, abertura e "Continuar assistindo".
+function Rel-LibPath($full) { ($full.Substring($HdRoot.TrimEnd('\').Length).TrimStart('\')) -replace '\\', '/' }
+
+# legendas da versao antiga: apagadas se a nova trouxe as proprias, senao renomeadas p/ a nova
+function Move-OldSubs($oldName, $newName, $hasNewSubs) {
+    $subDir = Join-Path $HdRoot 'subs'
+    if (-not (Test-Path -LiteralPath $subDir)) { return }
+    Get-ChildItem -LiteralPath $subDir -File -EA 0 | Where-Object {
+        $_.Name.StartsWith($oldName + '.', [StringComparison]::OrdinalIgnoreCase)
+    } | ForEach-Object {
+        if ($hasNewSubs) {
+            Remove-Item -LiteralPath $_.FullName -Force
+            Log "    legenda antiga removida: $($_.Name)"
+        } else {
+            $nn = $newName + $_.Name.Substring($oldName.Length)
+            $dst = Join-Path $subDir $nn
+            if (-not (Test-Path -LiteralPath $dst)) { Move-Item -LiteralPath $_.FullName -Destination $dst; Log "    legenda renomeada: $nn" }
+        }
+    }
+}
+
+# $renames = @{ Old = caminho antigo; New = caminho novo } (caminhos no HD)
+function Update-LibraryRefs($renames) {
+    if (-not $renames.Count) { return }
+    $utf8 = New-Object Text.UTF8Encoding($false)
+
+    # skip.json (chave = nome do arquivo): mantem op/ed, descarta "cr" (outro
+    # encode = outro tempo de creditos; o detectar-creditos.ps1 refaz)
+    $skipFile = Join-Path $HdRoot 'skip.json'
+    if (Test-Path -LiteralPath $skipFile) {
+        try {
+            $raw = [IO.File]::ReadAllText($skipFile) | ConvertFrom-Json
+            $changed = $false
+            foreach ($r in $renames) {
+                $on = Split-Path $r.Old -Leaf; $nn = Split-Path $r.New -Leaf
+                $p = $raw.PSObject.Properties[$on]
+                if (-not $p) { continue }
+                $o = [ordered]@{}
+                foreach ($q in $p.Value.PSObject.Properties) { if ($q.Name -ne 'cr') { $o[$q.Name] = $q.Value } }
+                $raw.PSObject.Properties.Remove($on)
+                if ($o.Count) { $raw | Add-Member -NotePropertyName $nn -NotePropertyValue ([pscustomobject]$o) -Force }
+                $changed = $true
+            }
+            if ($changed) { [IO.File]::WriteAllText($skipFile, ($raw | ConvertTo-Json -Depth 5), $utf8); Log '  skip.json: entradas migradas p/ os nomes novos' }
+        } catch { Log "  skip.json nao atualizado: $($_.Exception.Message)" }
+    }
+
+    # cache do detectar-creditos.ps1: tira o nome antigo (o novo sera analisado)
+    $crFile = Join-Path $HdRoot 'creditos-analisados.json'
+    if (Test-Path -LiteralPath $crFile) {
+        try {
+            $raw = [IO.File]::ReadAllText($crFile) | ConvertFrom-Json
+            $changed = $false
+            foreach ($r in $renames) {
+                $on = Split-Path $r.Old -Leaf
+                if ($raw.PSObject.Properties[$on]) { $raw.PSObject.Properties.Remove($on); $changed = $true }
+            }
+            if ($changed) { [IO.File]::WriteAllText($crFile, ($raw | ConvertTo-Json -Depth 3), $utf8) }
+        } catch { Log "  creditos-analisados.json nao atualizado: $($_.Exception.Message)" }
+    }
+
+    # progresso.json (+ .bak) da TV: chave = caminho completo NA TV, que
+    # termina com o caminho relativo a biblioteca
+    foreach ($pf in 'progresso.json', 'progresso.bak.json') {
+        $progFile = Join-Path $HdRoot $pf
+        if (-not (Test-Path -LiteralPath $progFile)) { continue }
+        try {
+            $raw = [IO.File]::ReadAllText($progFile) | ConvertFrom-Json
+            $changed = $false
+            foreach ($r in $renames) {
+                $oldRel = '/' + (Rel-LibPath $r.Old); $newRel = '/' + (Rel-LibPath $r.New)
+                foreach ($p in @($raw.PSObject.Properties)) {
+                    if (-not $p.Name.EndsWith($oldRel, [StringComparison]::OrdinalIgnoreCase)) { continue }
+                    $newKey = $p.Name.Substring(0, $p.Name.Length - $oldRel.Length) + $newRel
+                    $rec = $p.Value
+                    $rec.path = $newKey
+                    $rec.name = $newKey.Substring($newKey.LastIndexOf('/') + 1)
+                    if ($rec.PSObject.Properties['dir']) { $rec.dir = $newKey.Substring(0, $newKey.LastIndexOf('/')) }
+                    $raw.PSObject.Properties.Remove($p.Name)
+                    $raw | Add-Member -NotePropertyName $newKey -NotePropertyValue $rec -Force
+                    $changed = $true
+                }
+            }
+            if ($changed) { [IO.File]::WriteAllText($progFile, ($raw | ConvertTo-Json -Depth 5 -Compress), $utf8); Log "  ${pf}: progresso migrado p/ os nomes novos" }
+        } catch { Log "  $pf nao atualizado: $($_.Exception.Message)" }
+    }
+}
+
 function Do-Import {
     if ($script:busy) { return }
     $show = Get-ShowText
@@ -600,6 +677,7 @@ function Do-Import {
         $flat = Is-Flat $show
         Log "== Importando: $show  ($(if ($flat) {'pasta unica'} else {'por temporada'})) =="
         $ok = 0; $fail = 0; $newSeason = @{}
+        $renames = New-Object System.Collections.ArrayList
         foreach ($it in $todo) {
             $destDir = Split-Path $it.Dst -Parent
             if (-not (Test-Path -LiteralPath $destDir)) { New-Item -ItemType Directory -Force -Path $destDir | Out-Null; if (-not $flat) { $newSeason[$it.Season] = $true } }
@@ -614,28 +692,34 @@ function Do-Import {
                 $bad = @(Get-CompatIssues -File $part -Ffprobe $ffprobe -Ffmpeg $ffmpeg) -match 'CORROMPIDO|TRUNCADO|sem faixa|decodificacao falhou|duracao invalida'
                 if ($bad) { Log "    copia com problema ($($bad -join '; ')) - descartada, HD intacto"; Remove-Item -LiteralPath $part -Force; $fail++; continue }
             }
+            $replaced = @()
             foreach ($old in $it.Existing) {
                 if ($old.FullName -ne $it.Dst) {
                     Remove-Item -LiteralPath $old.FullName -Force
                     $ot = Join-Path (Join-Path $HdRoot 'thumbs') ($old.Name + '.jpg')
                     if (Test-Path -LiteralPath $ot) { Remove-Item -LiteralPath $ot -Force }
                     Log "    removida versao anterior: $($old.Name)"
+                    $replaced += $old
+                    [void]$renames.Add(@{ Old = $old.FullName; New = $it.Dst })
                 }
             }
             Move-Item -LiteralPath $part -Destination $it.Dst -Force
             $ok++
             # legendas externas ao lado do video de origem
             $srcBase = [IO.Path]::GetFileNameWithoutExtension($it.Path)
-            Get-ChildItem -LiteralPath (Split-Path $it.Path) -File -EA 0 | Where-Object {
+            $newSubs = @(Get-ChildItem -LiteralPath (Split-Path $it.Path) -File -EA 0 | Where-Object {
                 $sext -contains $_.Extension.ToLower() -and $_.BaseName.StartsWith($srcBase) -and $_.Length -ge 200
-            } | ForEach-Object {
+            })
+            foreach ($sf in $newSubs) {
                 $subDir = Join-Path $HdRoot 'subs'; New-Item -ItemType Directory -Force -Path $subDir | Out-Null
-                $suf = $_.BaseName.Substring($srcBase.Length)
-                Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $subDir ((Split-Path $it.Dst -Leaf) + $suf + $_.Extension)) -Force
-                Log "    legenda: $($_.Name)"
+                $suf = $sf.BaseName.Substring($srcBase.Length)
+                Copy-Item -LiteralPath $sf.FullName -Destination (Join-Path $subDir ((Split-Path $it.Dst -Leaf) + $suf + $sf.Extension)) -Force
+                Log "    legenda: $($sf.Name)"
             }
+            foreach ($old in $replaced) { Move-OldSubs $old.Name (Split-Path $it.Dst -Leaf) ($newSubs.Count -gt 0) }
             Make-Thumb $it.Dst $it.Season $it.Ep (-not $flat)
         }
+        Update-LibraryRefs $renames
         Log "Concluido: $ok importado(s), $fail falha(s), $(@($script:items | Where-Object { $_.Action -eq 'skip' }).Count) pulado(s)."
         if (-not $flat) {
             Make-SeriesCover $show

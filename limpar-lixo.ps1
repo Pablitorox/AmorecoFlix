@@ -13,17 +13,31 @@ param([string]$Root = 'E:\AmorecoFlix', [switch]$Apply)
 $ErrorActionPreference = 'Continue'
 
 $JUNK_EXT  = @('.url','.txt','.nfo','.exe','.lnk','.htm','.html','.website','.md5','.sfv','.diz')
-$JUNK_NAME = 'promo|1xbet|comando\.to|torrentdosfilmes|bludv|lapumia|hipnos|douglasvip|by-luanharper|thepiratefilmes|semear|mais\s*lan|leia|amostra|sample|screens?|divx|rarbg'
+# palavras inteiras (\b): sem isso "hipnos" pegava o filme "Hipnose" e "leia" qualquer nome com "Leia"
+$JUNK_NAME = '\b(promo\w*|1xbet|comando\.to|torrentdosfilmes|bludv|lapumia|hipnos|douglasvip|by-luanharper|thepiratefilmes|semear|mais\s*lan|leia[\s._-]*me|amostras?|samples?|screens?|divx|rarbg)\b'
 $KEEP_EXT  = @('.mkv','.mp4','.avi','.m4v','.ts','.mov','.wmv','.srt','.ass','.ssa','.vtt','.sub','.idx','.json')
+$VIDEO_EXT = @('.mkv','.mp4','.avi','.m4v','.ts','.mov','.wmv')
 
 $thumbsDir = (Join-Path $Root 'thumbs').ToLower()
 $targets = New-Object System.Collections.ArrayList
 
+# pasta com video de verdade (>= 40 MB) dentro nunca e apagada, mesmo que o nome bata
+function Has-RealVideo($dir) {
+    [bool](Get-ChildItem -LiteralPath $dir -Recurse -File -Force -EA 0 |
+           Where-Object { $VIDEO_EXT -contains $_.Extension.ToLower() -and $_.Length -ge 40MB } |
+           Select-Object -First 1)
+}
+
 Get-ChildItem -LiteralPath $Root -Recurse -Force -EA 0 | ForEach-Object {
     $f = $_
     if ($f.PSIsContainer) {
+        # [eé] = "e" ou "e com acento" (ASCII no fonte: o PowerShell 5.1 le .ps1 sem BOM como ANSI)
         if ($f.Name -match '^(cr[eé]ditos|amostra|sample|screens?|extras?)\b' -or $f.Name -match $JUNK_NAME) {
-            [void]$targets.Add($f)
+            if (Has-RealVideo $f.FullName) {
+                Write-Host "  (mantida, tem video) $($f.FullName.Replace($Root, ''))" -ForegroundColor DarkGray
+            } else {
+                [void]$targets.Add($f)
+            }
         }
         return
     }

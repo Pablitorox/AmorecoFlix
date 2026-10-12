@@ -24,7 +24,7 @@ param(
     [switch]$WhatIf
 )
 $ErrorActionPreference = 'Continue'
-. (Join-Path $PSScriptRoot 'tmdb-key.ps1')
+. (Join-Path $PSScriptRoot 'lib.ps1')
 if (-not $ApiKey) { $ApiKey = Get-TmdbApiKey }
 if (-not $ApiKey) { Write-Error "Informe -ApiKey ou crie .env com TMDB_API_KEY=..."; exit 1 }
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
@@ -33,10 +33,8 @@ $ThumbsDir = Join-Path $Root 'thumbs'
 $vext = @('.mkv','.mp4','.avi','.m4v','.ts')
 $sext = @('.srt','.ass','.ssa','.sub','.idx','.vtt')
 
-$ffmpeg = (Get-Command ffmpeg -EA 0).Source
-if (-not $ffmpeg) { $b = Get-ChildItem "$env:LOCALAPPDATA\Microsoft\WinGet\Packages\Gyan.FFmpeg_*" -Recurse -Filter ffmpeg.exe -EA 0 | Select-Object -First 1; if ($b) { $ffmpeg = $b.FullName } }
-$ffprobe = $null
-if ($ffmpeg) { $ffprobe = Join-Path (Split-Path $ffmpeg) 'ffprobe.exe' }
+$ffmpeg  = Find-FfTool 'ffmpeg'
+$ffprobe = Find-FfTool 'ffprobe'
 $compatLib = Join-Path $PSScriptRoot 'checar-compatibilidade.ps1'
 if (Test-Path -LiteralPath $compatLib) { . $compatLib -AsLibrary }
 if (-not (Test-Path -LiteralPath $Src)) { Write-Error "pasta nao existe: $Src"; exit 1 }
