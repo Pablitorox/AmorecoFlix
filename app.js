@@ -209,7 +209,7 @@ function listDirectory(dir, onDone) {
                 entries.push({ file: f, name: f.name, isDir: true });
             } else if (isVideoFile(f.name)) {
                 if (f.fileSize && f.fileSize < 8 * 1024 * 1024) { continue; } // promo/sample
-                if (isJunkVideo(f.name, f.fileSize)) { continue; }             // propaganda de site
+                if (isJunkVideo(f.name)) { continue; }                          // propaganda de site
                 var mod = 0;
                 try { mod = f.modified ? +f.modified : 0; } catch (e) {}
                 entries.push({ file: f, name: f.name, isDir: false, size: f.fileSize, mod: mod });
@@ -232,15 +232,16 @@ function listDirectory(dir, onDone) {
 function isVideoFile(name) { return VIDEO_EXT.indexOf(ext(name)) !== -1; }
 
 /* Video de propaganda de site de torrent ("BLUDV TV.mp4", "Promo Comando.mkv")
- * que veio junto com os episodios. Mesma lista do limpar-lixo.ps1, mas so
- * ignora se o nome NAO tiver cara de episodio/filme (S01E02, Episodio 2, ano)
- * e o arquivo for pequeno - "Serie.S01E01.BLUDV.mkv" continua aparecendo. */
-var JUNK_VIDEO = /\b(promo\w*|1xbet|comando\.to|torrentdosfilmes|bludv|lapumia|hipnos|douglasvip|thepiratefilmes|amostras?|samples?|trailer)\b/i;
-function isJunkVideo(name, size) {
+ * que veio junto com os episodios: nunca aparece (pastas, biblioteca,
+ * Continuar), de qualquer tamanho. Mesma lista do limpar-lixo.ps1.
+ * Unica excecao: nome com numero de episodio ("Serie.S01E01.BLUDV.mkv" e um
+ * episodio de verdade que so leva o nome do site). */
+// fronteira que entende acento ("Promoção" nao e "promo")
+var JUNK_VIDEO = /(^|[^a-z0-9À-ÿ])(promo|1xbet|comando\.to|comandotorrents?|torrentdosfilmes|bludv|lapumia|hipnos|douglasvip|thepiratefilmes|amostras?|samples?|trailer|propaganda)(?![a-z0-9À-ÿ])/i;
+function isJunkVideo(name) {
     var base = stripExt(name);
     if (!JUNK_VIDEO.test(base)) { return false; }
-    if (/[sS]\d{1,2}[\s._-]*[eE]\d{1,3}|\d{1,2}x\d{1,3}|epis[oó]dio\s*\d|\b(19|20)\d{2}\b/i.test(base)) { return false; }
-    return !size || size < 400 * 1024 * 1024;
+    return !/[sS]\d{1,2}[\s._-]*[eE]\d{1,3}|\b\d{1,2}x\d{1,3}\b|epis[oó]dio\s*\d/i.test(base);
 }
 
 /* Ordenacao natural: "S01E02" antes de "S01E10". */
