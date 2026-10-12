@@ -21,3 +21,6 @@ calendario-data.js
 
 # logs, CSVs e scripts avulsos de manutencao (os ja rastreados continuam no git)
 scratchpad/
+
+# logs do importador.ps1
+logs/
