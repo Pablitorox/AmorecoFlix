@@ -54,7 +54,9 @@ var Icons = (function () {
  * position:relative (offsetLeft dos itens) e o pai e a "janela" visivel. */
 function railScroller(rail) {
     return function (item) {
-        var view = rail.parentNode.offsetWidth;
+        // largura util da janela (sem o padding): o ultimo card nao encosta na borda
+        var p = rail.parentNode, cs = getComputedStyle(p);
+        var view = p.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
         var max = Math.max(0, rail.scrollWidth - view);
         var x = item.offsetLeft + item.offsetWidth / 2 - view / 2;
         x = Math.max(0, Math.min(max, x));

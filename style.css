@@ -160,6 +160,8 @@ body.playing .screen {
 .row-h { margin: 0 0 20px; font-family: var(--font-title); font-weight: 600; font-size: 30px; }
 .row-view { position: relative; overflow: hidden; margin: -16px -24px; padding: 16px 24px; }
 .row-rail { position: relative; display: flex; gap: 28px; transition: transform 0.22s ease; }
+/* folga no fim: o ultimo card (aumentado e com contorno) nao fica cortado na borda da tela */
+.row-rail::after, .p-episodes-rail::after { content: ""; flex: 0 0 68px; }
 
 /* ---------- card 16:9 ---------- */
 .c16 { flex: none; display: flex; flex-direction: column; gap: 14px; cursor: pointer; }
@@ -742,3 +744,5 @@ body.resuming #spinner { display: none !important; }
     animation: spin 0.9s linear infinite;
 }
 @keyframes spin { to { transform: rotate(360deg); } }
+.season-arrow { font-size: 14px; opacity: 0; }
+.season-btn:focus .season-arrow { opacity: 0.55; }
