@@ -10,7 +10,9 @@ var Folders = (function () {
 
     function $(id) { return document.getElementById(id); }
     var el = { screen: $('screen-folders'), crumb: $('breadcrumb'), scroll: $('fl-scroll'), list: $('file-list') };
-    var scrollGrid = vScroller(el.scroll, 760, 24);
+    // rola a GRADE dentro da janela fixa (fl-scroll recorta) - rolar a janela
+    // fazia os cards subirem por cima da barra do topo e do caminho
+    var scrollGrid = vScroller(el.list, 760, 24);
 
     /* ---------- dados de uma pasta ---------- */
 
