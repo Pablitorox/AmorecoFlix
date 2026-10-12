@@ -1,249 +1,211 @@
-# AmorecoFlix - Tizen Web App
+# AmorecoFlix
 
-Reprodutor de midia autonomo para Samsung Smart TV. **Rodando na TV
-`UN50DU7700` (Tizen 9.0)** via sideload. Le videos da pasta `AmorecoFlix` de
-um HD USB conectado direto na TV e guarda o progresso ("Continuar assistindo").
+Um "Netflix pessoal" para Smart TV Samsung (Tizen): um app que toca os vídeos de
+um **HD USB ligado direto na TV**, com capas, sinopses, "Continuar assistindo",
+próximo episódio, pular abertura e escolha de áudio e legenda. Sem servidor, sem
+nuvem e sem assinatura: a TV lê o HD e o progresso fica salvo no próprio HD.
 
-> **Gotcha descoberto na pratica:** a TV Samsung **recusa a instalacao se o
-> `<name>` do `config.xml` tiver espacos**. Use hifen (`Meu-Player-USB`) ou
-> uma palavra so (`AmorecoFlix`).
-> (Sintoma: `Failed to install Tizen application` em ~1,3s, sem log.)
+O repositório traz também os **scripts do PC** (PowerShell) que organizam a
+biblioteca: importar episódios, baixar capas e sinopses do TMDB, organizar
+legendas, detectar créditos e checar se o arquivo vai tocar na TV.
 
-## Arquivos
+> Feito e testado numa **Samsung UN50DU7700 (Tizen 9)**, instalado por sideload
+> (modo desenvolvedor). Deve funcionar em outras Samsung com Tizen recente, mas
+> não foi testado.
+>
+> O projeto não inclui nem baixa vídeos: ele só toca o que já está no seu HD.
 
-### App (vai para dentro do `.wgt`)
+## O que o app faz
 
-| Arquivo       | Papel |
-|---------------|-------|
-| `config.xml`  | Manifesto Tizen + privilegios (filesystem, content, tv.inputdevice, ...). |
-| `index.html`  | Estrutura das telas: Inicio, pagina do titulo, Biblioteca, Pastas, Sem HD, Opcoes e o player. |
-| `app.js`      | Nucleo: `mapUsb()` (tizen.filesystem), `Player` (webapis.avplay + retomada + fallback `<video>`), `ProgressStore` (progresso no HD), capas/legendas/skip, proximo episodio e NetUpload. |
-| `js/nav.js`, `js/router.js` | Foco por D-pad em grupos declarados por tela; pilha de telas (RETURN volta) e camadas (paineis, Opcoes). |
-| `js/components.js` | Icones, card 16:9, imagens com carregamento preguicoso, rolagem por `transform`. |
-| `js/library.js` | `Meta` (le `meta/biblioteca.json`) e `Library` (titulos, temporadas, episodios, progresso por titulo). |
-| `js/player-ui.js` | Interface do player: controles, avanco, pular abertura, proximo episodio, audio e legendas, episodios, Retomando. |
-| `js/screens/*.js` | Inicio, pagina do titulo (`series.js`), Biblioteca (`catalog.js`), Pastas (`folders.js`) e o comum (barra do topo, Opcoes, Sem HD). |
-| `style.css`   | Tokens do design (cores, margens), fontes e todas as telas. |
-| `fonts/`      | Sora (titulos) e Figtree (texto), licenca OFL - embutidas, funcionam offline. |
-| `icon.png`    | Icone do app. |
+- **Início**: destaque com o que você está vendo, **Continuar assistindo** e
+  **Próximos episódios**.
+- **Página do título** (série, anime, filme ou coleção): sinopse, nota, ano,
+  seletor de temporada, episódios com título e progresso, e marcar a temporada
+  como vista.
+- **Biblioteca**: grade de pôsteres com filtros (séries, animes, filmes, em
+  andamento, não começadas, recém-adicionados) e o selo "NOVO EP".
+- **Pastas**: navegação pelas pastas do HD, para quando você quer ver tudo.
+- **Opções** (segurar OK num card): continuar, começar do início, marcar como
+  assistido, tirar de "Continuar assistindo".
+- **Player** (AVPlay da TV):
+  - avanço acelerado com balão ao segurar ◀ ▶;
+  - "Pular abertura" e card de "Próximo episódio" nos créditos;
+  - painéis de **Episódios** e **Áudio e legendas** (a escolha vale para a série toda);
+  - legendas embutidas ou externas (`.srt`, `.ass`, `.vtt`...).
+- **Retomada confiável**: volta ao ponto salvo mesmo nos casos em que o AVPlay
+  dessa TV trava no seek (detalhes em [Como funciona](#como-funciona)).
+- **Progresso no HD** (`progresso.json` + backup): sobrevive a reinstalar o app
+  e a trocar o HD de porta.
+- Ignora sozinho os vídeos de propaganda que vêm junto dos torrents.
 
-So isso entra no pacote (`$AppFiles` no `build.ps1`; pastas entram inteiras).
-O build para se o `index.html`/`style.css` citar um arquivo que ficou de fora.
+## Estrutura do HD
 
-Prototipo do design: https://claude.ai/artifact/V9AxmuAiwkTo2ZcstYXhnw -
-plano e decisoes em `PLANO-REDESIGN.md`.
+O app procura uma pasta `AmorecoFlix` na raiz do HD:
 
-### Scripts do PC
-
-| Script | Papel |
-|--------|-------|
-| `build.ps1` | Monta o app numa pasta temporaria + `build-web` + `package` assinado + (opcional) instala na TV. |
-| `lib.ps1` | Funcoes comuns: `Get-EnvValue`, `Get-TmdbApiKey` (`.env`), `Find-FfTool` (ffmpeg/ffprobe) e as buscas no TMDB (`Find-TmdbTv/Movie/Collection`, `Get-SeasonEpisode`...). |
-| `metadados.ps1` | Sinopse, ano, generos, nota, titulos de episodio e artes do TMDB em `AmorecoFlix/meta/` (`biblioteca.json`, `fundos/`, `posters/`). Incremental; `-Only "Serie"`, `-Force`; correcoes em `meta/ids.json`. Roda sozinho no fim do Importador e do `import-serie.ps1`. |
-| `tools/simulador/` | Roda o app no navegador com a TV falsa (`node tools/simulador/serve.js`; `?hd=real` le o HD sem gravar). Ver `LEIA.txt`. |
-| `Importador.bat` / `importador.ps1` | Janela para passar episodios de Downloads para o HD (analise, copia verificada, legendas, miniaturas, revisao por IA opcional). |
-| `import-serie.ps1` | Mesmo fluxo, por linha de comando. |
-| `checar-compatibilidade.ps1` | Integridade e codecs de risco para a TV (tambem usado como biblioteca pelos importadores). |
-| `detectar-creditos.ps1` / `skip-anime.ps1` | Preenchem o `skip.json` (creditos `cr`, abertura/encerramento `op`/`ed`). |
-| `gerar-thumbnails.ps1`, `capas-temporada.ps1`, `posters-*.ps1` | Capas e miniaturas em `AmorecoFlix/thumbs`. |
-| `organizar-subs.ps1` | Move legendas para `AmorecoFlix/subs`. |
-| `limpar-lixo.ps1` | Remove arquivos de release/propaganda (simulacao por padrao; `-Apply` apaga). |
-| `transferir-hd.ps1` | Copia pastas grandes com Robocopy. |
-| `calendario-lancamentos.ps1` + `calendario.html` | Calendario de episodios novos (gera `calendario-data.js`, ignorado pelo git: contem a chave). |
-
-Chaves (TMDB, Gemini/Anthropic) ficam no `.env` (fora do git e do `.wgt`).
-
-## Como o app funciona
-
-1. Ao abrir, `scanUsb()` chama `tizen.filesystem.listStorages()` e filtra os
-   storages `EXTERNAL` / `removable*` no estado `MOUNTED`.
-2. Resolve o primeiro, entra na pasta `AmorecoFlix` e lista pastas + videos
-   (`mp4, mkv, avi, mov, ts, ...`), com ordenacao **natural** (`S01E02` antes de `S01E10`).
-   `thumbs/`, `subs/`, `skip.json` e `meta/biblioteca.json` sao (re)lidos a
-   cada escaneamento (tecla VERMELHA); a `Library` le as pastas em segundo
-   plano (2 por vez) e guarda um cache para o Inicio aparecer na hora.
-3. Ao abrir um video: `webapis.avplay.open() -> prepareAsync() -> play()`.
-   **Retomada** (ponto salvo): nessa TV, pedir o `seekTo()` e chamar `play()`
-   sem esperar o seek terminar deixa o player em "PLAYING" **parado** no
-   quadro do ponto salvo (qualquer arquivo/ponto - visto no log em Out/2026);
-   dai em diante todo seek nesse player falha (`PLAYER_ERROR_SEEK_FAILED`) e
-   so reabrir resolve. Por isso cada tentativa usa um player recem-aberto e
-   um de dois metodos: **seek antes do play** (`play()` so no callback de
-   sucesso do seek / buffer pronto) ou **play antes do seek** (toca, espera
-   andar, ai pede o seek). Plano: metodo preferido -> o outro -> o outro 20 s
-   antes -> a tela Retomando pergunta "Comecar do inicio" (sozinho em 5 s) ou
-   "Tentar de novo" (ponto salvo preservado). O metodo que
-   funcionar fica memorizado (`resumeMethod` nas preferencias). So conta
-   como retomado quando o video ANDA depois de chegar no ponto. Enquanto isso
-   nada e gravado. O progresso tambem e salvo a cada evento de posicao (~3 s).
-   **Travou no meio do video** (12 s parado): reemite play; 22 s -> reabre no
-   ponto e, se nao andar, 15 s / 30 s adiante - nunca seek no player parado
-   e nunca do zero; 38 s -> volta pra tela inicial.
-4. A cada 3 s grava `{ path, position, duration, done, updated }` no
-   `localStorage`; no HD (`AmorecoFlix/progresso.json` + copia
-   `progresso.bak.json`) grava no maximo a cada 30 s e sempre ao pausar, parar
-   ou sair. A chave e o caminho **relativo a biblioteca**
-   (`Series/Show/.../ep.mkv`), entao nao importa com que nome a TV monta o HD.
-   Ao abrir, HD e `localStorage` sao mesclados por episodio (fica o mais
-   recente); `progresso.json` corrompido -> usa o `.bak`.
-   O console do app tambem e gravado em `AmorecoFlix/amorecoflix.log`
-   (ate 512 KB) - a TV de varejo nao deixa ler logs pelo `sdb`.
-5. Passou de 92% da duracao => marcado como `done` e sai de "Continuar assistindo".
-6. No fim do video, `findNextEpisode()` oferece o proximo arquivo da pasta; no
-   ultimo episodio da temporada, o 1o da pasta da temporada seguinte
-   (`Show - 2ª Temporada`, `Temporada 2`, `Season 2`, `S02`). O proximo
-   episodio abre no ponto salvo dele, se ja tinha sido comecado.
-7. **Card "Proximo episodio" nos creditos:** quando o episodio chega ao inicio
-   dos creditos aparece o card (OK = assistir, ▲ = ocultar; sem contagem). O
-   momento vem de, nesta ordem: fim do encerramento (`ed`) de anime, `cr[0]` do
-   `skip.json`, ou o padrao `fim - 45 s`. Ao chegar no fim sem ter agido, vale
-   a contagem de 5 s (autoplay) de sempre.
-
-### Detectar o inicio dos creditos (`detectar-creditos.ps1`)
-
-Analisa o final de cada episodio com ffmpeg (fundo escuro + texto, trecho
-continuo perto do fim) e grava `"cr": [inicio, duracao]` no `skip.json`,
-sem apagar `op`/`ed`. Roda uma vez por episodio (cache em
-`creditos-analisados.json`); depois de importar series novas, rode de novo.
-
-```powershell
-.\detectar-creditos.ps1                        # biblioteca toda (pula analisados)
-.\detectar-creditos.ps1 -Only "The Originals"  # uma serie
-.\detectar-creditos.ps1 -Path ep.mkv -Show     # testa 1 arquivo sem gravar
+```
+AmorecoFlix/
+├── Series/
+│   └── The Vampire Diaries/
+│       ├── The Vampire Diaries - 1ª Temporada/
+│       │   ├── The Vampire Diaries S01E01.mp4
+│       │   └── ...
+│       └── The Vampire Diaries - 2ª Temporada/
+├── Animes/
+│   └── Death Parade/                 (episódios soltos também valem)
+├── Filmes/
+│   ├── Tenet (2020) [1080p].mkv      (filme solto)
+│   └── Vingadores/                   (pasta = coleção)
+├── thumbs/      capas e miniaturas      (scripts do PC)
+├── subs/        legendas externas       (organizar-subs.ps1)
+├── meta/        biblioteca.json, fundos/, posters/   (metadados.ps1)
+├── skip.json    abertura, encerramento e créditos    (skip-anime.ps1, detectar-creditos.ps1)
+└── progresso.json   gravado pelo app
 ```
 
-Creditos sobre imagem (finais de temporada etc.) nao sao detectados; nesses
-o app usa o padrao `fim - 45 s`.
+As pastas de temporada são reconhecidas como `Nome - 2ª Temporada`,
+`Temporada 2`, `Season 2` ou `S02`, e os episódios por `S01E02`, `1x02`,
+`Episódio 2` ou `02 Título`. Sem as pastas `thumbs`, `meta`, `subs` e o `skip.json`
+o app funciona do mesmo jeito, só com menos informação na tela.
 
-### Telas
+## Requisitos
 
-- **Inicio** (abre aqui): destaque fixo com o que voce esta vendo (fundo e
-  sinopse do TMDB), **Continuar assistindo** e **Proximos episodios**.
-- **Pagina do titulo** (serie, anime, filme, colecao): Continuar / Assistir /
-  Assistir de novo, Do inicio, marcar a temporada como vista, seletor de
-  temporada e os episodios com titulo.
-- **Biblioteca**: posteres com filtros (tipo, em andamento, nao comecadas,
-  recem-adicionados) e selo NOVO EP.
-- **Pastas**: a navegacao pelas pastas do HD, com o andamento de cada pasta.
-- **Opcoes** (segurar OK num card): continuar, do inicio, ver episodios,
-  marcar como assistido, tirar de Continuar assistindo (o ponto fica salvo).
-- **Player**: barra com tempo restante e marca de creditos; Episodios e
-  Audio e legendas pausam o video; a escolha de faixa vale por serie; a tela
-  **Retomando** mostra a volta ao ponto salvo e, se falhar, pergunta
-  (Comecar do inicio em 5 s / Tentar de novo).
+- TV Samsung com Tizen e **modo desenvolvedor** ligado.
+- PC com Windows e:
+  - [Tizen Studio](https://developer.samsung.com/smarttv/develop/getting-started/setting-up-sdk/installing-tv-sdk.html)
+    com as TV Extensions e o Samsung Certificate Extension;
+  - JDK 17;
+  - [ffmpeg](https://ffmpeg.org/) (opcional: miniaturas, créditos, checagem de arquivos);
+  - Node.js (opcional: simulador).
+- Uma [chave do TMDB](https://www.themoviedb.org/settings/api) para capas e sinopses.
 
-### Teclas do controle
+## Instalação na TV
+
+1. **Modo desenvolvedor**: na TV, abra **Apps**, digite `12345` no controle,
+   ligue o **Modo de Desenvolvedor**, informe o IP do PC e reinicie a TV.
+2. **Conectar**: com PC e TV na mesma rede:
+   ```powershell
+   sdb connect IP_DA_TV
+   ```
+3. **Certificado Samsung** (obrigatório para TV de loja): no Certificate Manager
+   do Tizen Studio, crie um perfil **Samsung** (login na conta Samsung). Com a
+   TV conectada, o assistente lê o DUID dela para o certificado de distribuidor.
+4. **Build e instalação**:
+   ```powershell
+   .\build.ps1 -Profile NOME_DO_PERFIL -Install -Tv IP_DA_TV
+   ```
+   O `build.ps1` monta o pacote numa pasta temporária só com os arquivos do app
+   (nunca com `.env`, `.git` ou scripts) e para se o `index.html` ou o
+   `style.css` citarem um arquivo que ficou de fora.
+
+> **Pegadinha**: a TV recusa instalar se o `<name>` do `config.xml` tiver
+> espaços (`Failed to install Tizen application`, sem log).
+
+## Scripts do PC
+
+Copie `.env.example` para `.env` e preencha a chave do TMDB. O `.env` fica fora do
+git e do pacote da TV.
+
+| Script | Para que serve |
+|--------|----------------|
+| `Importador.bat` / `importador.ps1` | Janela para passar episódios de Downloads para o HD: análise, cópia verificada, legendas, miniaturas, metadados e revisão opcional por IA (Gemini ou Claude). |
+| `import-serie.ps1` | O mesmo fluxo, por linha de comando. |
+| `metadados.ps1` | Sinopse, ano, gêneros, nota, títulos dos episódios e artes do TMDB em `meta/`. Incremental; `-Only "Série"` refaz um título, `-Force` refaz tudo; correções manuais em `meta/ids.json`. |
+| `checar-compatibilidade.ps1` | Arquivo corrompido, truncado ou com codec de risco para a TV (ffprobe/ffmpeg). |
+| `skip-anime.ps1` | Abertura e encerramento de animes (API do AniSkip) no `skip.json`. |
+| `detectar-creditos.ps1` | Início dos créditos (ffmpeg) no `skip.json`: o card de próximo episódio aparece ali. |
+| `gerar-thumbnails.ps1`, `capas-temporada.ps1`, `posters-*.ps1` | Miniaturas e capas em `thumbs/`. |
+| `organizar-subs.ps1` | Junta as legendas em `subs/`. |
+| `limpar-lixo.ps1` | Remove arquivos de release e propaganda (só simula; `-Apply` apaga). |
+| `transferir-hd.ps1` | Cópia de pastas grandes com Robocopy. |
+| `calendario-lancamentos.ps1` + `calendario.html` | Calendário de episódios novos das suas séries. |
+| `lib.ps1` | Funções comuns (`.env`, ffmpeg, buscas no TMDB). |
+
+Os scripts funcionam no Windows PowerShell 5.1.
+
+## Envio de arquivos pela rede (opcional)
+
+O app tenta se conectar sozinho a um PC na rede local (WebSocket, porta 8788)
+para receber arquivos grandes e gravá-los no HD sem tirá-lo da TV. O IP do PC
+vem de `AmorecoFlix/netupload.json`:
+
+```json
+{ "pcIp": "192.168.0.10", "port": 8788 }
+```
+
+Sem esse arquivo, ele tenta um IP padrão e, sem resposta, fica quieto.
+
+## Simulador (testar sem a TV)
+
+```powershell
+node tools/simulador/serve.js
+```
+
+Abra `http://localhost:8765/test.html`. O simulador roda o app de verdade no
+navegador, com uma TV falsa (HD em memória e um AVPlay simulado, inclusive os
+travamentos de seek vistos na TV real). Com `?hd=real` ele lê a sua biblioteca
+(variável `HD`, padrão `E:/AmorecoFlix`) **sem gravar nada**. Parâmetros e
+atalhos em [`tools/simulador/LEIA.txt`](tools/simulador/LEIA.txt).
+
+## Teclas do controle
 
 | Tecla | Telas | Player |
 |-------|-------|--------|
-| Direcionais | mover foco (CIMA no topo = abas) | barra: ESQ/DIR voltam/avancam (segurar acelera, com balao); BAIXO = botoes; CIMA = voltar |
-| OK / Enter | abrir; **segurar = Opcoes** | play / pause; pula abertura / assiste o proximo quando o botao aparece |
-| PLAY / PAUSE | - | play / pause |
-| >> / << | - | +85s / -85s |
-| RETURN | tela anterior / pasta anterior / Inicio | fecha o painel; senao para e volta para a tela de origem |
-| VERMELHO (A) | procurar o HD de novo | - |
-| VERDE (B) | console de debug | console de debug |
-| AMARELO (C) | - | audio e legendas |
-| AZUL (D) | status da rede / cancelar envio | - |
+| Direcionais | mover o foco (para cima no topo = abas) | ◀ ▶ voltam/avançam (segurar acelera); ▼ botões; ▲ voltar |
+| OK | abrir; **segurar = Opções** | play/pause; pula a abertura / assiste o próximo quando o botão aparece |
+| PLAY / PAUSE | - | play/pause |
+| ⏩ / ⏪ | - | +85 s / -85 s |
+| RETURN | tela anterior / pasta anterior | fecha o painel; senão sai do vídeo |
+| VERMELHO | procurar o HD de novo | - |
+| VERDE | console de debug na tela | console de debug na tela |
+| AMARELO | - | áudio e legendas |
+| AZUL | status da rede / cancelar envio | - |
 
----
+## Como funciona
 
-## Ambiente ja instalado nesta maquina
+**Código do app** (o que vai para dentro do `.wgt`):
 
-| Componente | Local / versao |
-|---|---|
-| Tizen Studio | `C:\tizen-studio` (6.1) + dados em `C:\tizen-studio-data` |
-| JDK | Eclipse Temurin 17 (`JAVA_HOME` no PATH da maquina) |
-| Extensoes | TV Extensions 10.0, Samsung Certificate Extension, Certificate Manager |
-| CLI | `tizen` 2.5.25 e `sdb` 4.2.36 (no PATH: `C:\tizen-studio\tools` e `...\tools\ide\bin`) |
-| Certificado | author `MeuPlayerAuthor.p12` em `C:\tizen-studio-data\keystore\author` (senha guardada no Certificate Manager) |
-| Perfil de assinatura | `MeuPlayer` (ativo) em `C:\tizen-studio-data\profile\profiles.xml` |
+| Arquivo | Papel |
+|---------|-------|
+| `config.xml` | Manifesto Tizen e privilégios. |
+| `index.html`, `style.css`, `fonts/` | Telas, design (tokens em `:root`) e fontes Sora/Figtree embutidas. |
+| `app.js` | HD (`tizen.filesystem`), `Player` (AVPlay, retomada, travamentos), `ProgressStore`, capas, legendas, skip, próximo episódio, envio pela rede. |
+| `js/nav.js`, `js/router.js` | Foco por D-pad em grupos declarados por tela; pilha de telas e camadas. |
+| `js/library.js` | Títulos, temporadas e episódios lidos das pastas + `meta/biblioteca.json`. |
+| `js/components.js` | Ícones, cards, imagens com carregamento preguiçoso, rolagem por `transform`. |
+| `js/player-ui.js`, `js/screens/*.js` | Interface do player e das telas. |
 
-> O perfil `MeuPlayer` usa o **distribuidor Tizen** (bom p/ emulador). Para a TV
-> Samsung de varejo e preciso um **perfil Samsung** - veja a secao 3.
+**Retomada.** Nessa TV, pedir `seekTo()` e chamar `play()` sem esperar o seek
+terminar deixa o AVPlay em "PLAYING" parado no quadro do ponto salvo, e todo
+seek seguinte falha (`PLAYER_ERROR_SEEK_FAILED`). Por isso cada tentativa usa
+um player recém-aberto e um de dois métodos: **seek antes do play** (play só
+quando o seek termina) ou **play antes do seek**. O método que funcionar fica
+memorizado. Só conta como retomado quando o vídeo **anda** depois de chegar no
+ponto. Se tudo falhar, a tela "Retomando" pergunta: começar do início ou tentar
+de novo (o ponto continua salvo). Travamento no meio do vídeo segue a mesma
+lógica, reabrindo o arquivo um pouco à frente em vez de recomeçar.
 
-## Build (ja funciona por linha de comando)
+**Progresso.** A cada ~3 s vai para o `localStorage`; no HD
+(`progresso.json` + `progresso.bak.json`), no máximo a cada 30 s e sempre ao
+pausar, parar ou sair. A chave é o caminho relativo à biblioteca, então não
+importa com que nome a TV monta o HD. Ao abrir, os dois são mesclados episódio
+a episódio (fica o mais recente). Passou de 92% do vídeo, conta como assistido.
 
-Na pasta do projeto:
-```powershell
-.\build.ps1
-```
-Gera `.buildResult\AmorecoFlix.wgt` (assinado com o perfil `SamsungTV`).
-O build roda em `%TEMP%\amorecoflix-build`, que recebe **so** os arquivos do
-app. Nunca rode `tizen build-web` direto na pasta do projeto: ele empacota
-tudo (`.env` com as chaves, `.git`, scripts, scratchpad).
+**Debug.** A TV de loja não deixa ler logs nem abrir o Web Inspector pelo
+`sdb`. Por isso o app mostra o console na tela (tecla VERDE) e grava em
+`AmorecoFlix/amorecoflix.log`, para ler no PC.
 
-### 1. Emulador de TV
+O redesign das telas foi planejado em [`PLANO-REDESIGN.md`](PLANO-REDESIGN.md).
 
-```
-C:\tizen-studio\ide\TizenStudio.exe   >  Tools > Emulator Manager
-  > Create > escolha uma imagem "TV Samsung" (UHD)  >  Launch
-.\build.ps1 -Profile MeuPlayer
-tizen install -n AmorecoFlix.wgt -- .buildResult
-tizen run  -p MYpLyr0001.MeuPlayer
-```
+## Créditos
 
-> **Limitacao do emulador:** nao acessa HD USB real e o `AVPlay` normalmente nao
-> decodifica video. O app tem *fallbacks*: sem `webapis.avplay` usa `<video>`
-> HTML5; sem `tizen.filesystem` a lista fica vazia. Para exercitar a navegacao,
-> `sdb push` alguns `.mp4` e troque `scanUsb()` temporariamente para
-> `tizen.filesystem.resolve('documents', ...)`. **USB + AVPlay de verdade so na TV.**
+- Metadados e imagens: [TMDB](https://www.themoviedb.org/). *Este produto usa a
+  API do TMDB, mas não é endossado nem certificado pelo TMDB.*
+- Aberturas e encerramentos de animes: [AniSkip](https://aniskip.com/).
+- Fontes [Sora](https://fonts.google.com/specimen/Sora) e
+  [Figtree](https://fonts.google.com/specimen/Figtree) (SIL Open Font License,
+  textos em `fonts/`).
+- Projeto pessoal, sem relação com a Samsung nem com a Netflix.
 
-### 2. Conectar a TV (sideload)
+## Licença
 
-1. Na TV (UN50DU7700): **Apps** > digite `12345` no controle > **Modo de
-   Desenvolvedor = LIGADO** > informe o **IP do PC** > reinicie a TV.
-2. PC e TV na **mesma rede**. No PC:
-   ```powershell
-   sdb connect IP_DA_TV        # porta 26101 e assumida
-   sdb devices                 # deve listar a TV
-   ```
-
-### 3. Certificado Samsung (obrigatorio p/ TV de varejo)
-
-O `.wgt` assinado com `MeuPlayer` **nao instala** numa Samsung de loja
-(erro de assinatura de distribuidor). Crie um perfil Samsung:
-
-1. Abra o **Certificate Manager**
-   (`C:\tizen-studio\tools\certificate-manager\certificate-manager.exe`).
-2. `+` > **Samsung** > *Create a new certificate profile*.
-3. Faca login na **conta Samsung** (voce faz isso - nao da p/ automatizar).
-4. **Author certificate**: crie um novo (guarde a senha).
-5. **Distributor certificate**: com a TV ja conectada via `sdb`, o wizard le o
-   **DUID** dela automaticamente. Confirme.
-6. O perfil (ex.: `SamsungTV`) fica ativo.
-
-Depois:
-```powershell
-.\build.ps1 -Profile SamsungTV -Install -Tv IP_DA_TV
-```
-ou, com o `.wgt` ja gerado:
-```powershell
-tizen install -n AmorecoFlix.wgt -- .buildResult
-sdb shell 0 was_execute MYpLyr0001.MeuPlayer
-```
-
-### 4. Debug na TV
-
-```powershell
-sdb dlog -v time TIZEN_WEB_APP:* ConsoleMessage:* *:S   # logs do console.log
-```
-**Web Inspector**: com o app aberto na TV,
-`sdb shell 0 debug MYpLyr0001.MeuPlayer` devolve uma porta; abra
-`http://IP_DA_TV:PORTA` no **Chrome do PC** = DevTools completo da TV.
-
----
-
-## Proximos passos sugeridos
-
-1. ~~Miniaturas~~ **FEITO** - `ContentIndex` (app.js) usa `tizen.content.find`
-   + `scanDirectory`; a TV gera as thumbnails dos videos do USB e cruzamos pelo
-   caminho do arquivo. Fallback: card com emoji quando nao ha thumbnail.
-2. ~~Legendas~~ **FEITO** - pasta central `AmorecoFlix/subs` + faixas internas,
-   painel na tecla AMARELA.
-3. **Varrer subpastas** para montar um catalogo global (filmes x series) em vez
-   de navegar pasta a pasta.
-4. **IndexedDB** no lugar do `localStorage` se o historico crescer muito.
-5. **MediaController** (`webapis` / `tizen.mediacontroller`) para o play/pause
-   pelo botao do controle funcionar mesmo com a UI escondida.
-6. Tratar **multiplos storages** (varios HDs) na tela inicial.
+[MIT](LICENSE). As fontes em `fonts/` seguem a licença OFL delas.

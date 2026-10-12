@@ -8,7 +8,7 @@
   pulados (nao perde tempo recopiando o que ja esta certo).
 
   Uso:
-    .\transferir-hd.ps1 -Src "C:\Users\William\Downloads\Serie X" -Dst "E:\AmorecoFlix\Series\Serie X"
+    .\transferir-hd.ps1 -Src "$env:USERPROFILE\Downloads\Serie X" -Dst "E:\AmorecoFlix\Series\Serie X"
 
   Parametros opcionais:
     -Threads 8      numero de copias em paralelo (padrao 8; HD mecanico USB
