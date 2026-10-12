@@ -159,4 +159,8 @@ if (Test-Path $capas) {
     Write-Host "  capas-temporada.ps1 nao encontrado - rode manualmente" -ForegroundColor Yellow
 }
 
+# sinopse, titulos dos episodios e fundo 16:9 para o app (meta\biblioteca.json)
+$metaPs = Join-Path $PSScriptRoot 'metadados.ps1'
+if (Test-Path $metaPs) { & $metaPs -ApiKey $ApiKey -Root $Root -Only $Show }
+
 Write-Host ("PRONTO: {0} eps de {1} T{2}" -f $imported.Count, $Show, $Season) -ForegroundColor Green

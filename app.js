@@ -192,7 +192,7 @@ function stripExt(name) { var d = name.lastIndexOf('.'); return d < 0 ? name : n
  * @param {function(Array, Array)} onDone  (entries, images)
  */
 /* pastas de sistema / auxiliares que nunca sao mostradas */
-var HIDDEN_DIRS = ['thumbs', 'subs', 'legendas', '$recycle.bin', 'system volume information',
+var HIDDEN_DIRS = ['thumbs', 'subs', 'legendas', 'meta', '$recycle.bin', 'system volume information',
                    'found.000', '.trash', '@eadir'];
 
 var SUB_EXT = ['srt', 'ass', 'ssa', 'vtt', 'sub'];
@@ -209,7 +209,9 @@ function listDirectory(dir, onDone) {
                 entries.push({ file: f, name: f.name, isDir: true });
             } else if (isVideoFile(f.name)) {
                 if (f.fileSize && f.fileSize < 8 * 1024 * 1024) { continue; } // promo/sample
-                entries.push({ file: f, name: f.name, isDir: false, size: f.fileSize });
+                var mod = 0;
+                try { mod = f.modified ? +f.modified : 0; } catch (e) {}
+                entries.push({ file: f, name: f.name, isDir: false, size: f.fileSize, mod: mod });
             } else if (isImageFile(f.name)) {
                 images.push({ file: f, name: f.name, base: stripExt(f.name).toLowerCase() });
             } else if (isSubFile(f.name)) {
@@ -1335,6 +1337,29 @@ var ProgressStore = (function () {
         }
     }
 
+    /** Marca (ou desmarca) como assistido - cria o registro se o episodio
+        nunca foi aberto ("Marcar temporada como vista"). */
+    function setDone(path, done) {
+        var k = keyOf(path), r = cache[k];
+        if (!done) {
+            if (r && r.done) { r.done = false; r.position = 0; r.updated = Date.now(); persist(true); }
+            return;
+        }
+        if (!r) { r = cache[k] = { path: k, name: baseName(k), dir: dirName(k), position: 0, duration: 0 }; }
+        r.done = true;
+        r.position = 0;
+        r.hidden = false;
+        r.updated = Date.now();
+        persist(true);
+    }
+
+    /** "Tirar de Continuar assistindo": some da lista mas o ponto fica salvo;
+        assistir de novo (Player grava um registro novo) traz de volta. */
+    function hide(path) {
+        var r = cache[keyOf(path)];
+        if (r) { r.hidden = true; persist(true); }
+    }
+
     /** Itens NAO concluidos, mais recentes primeiro (aba Continuar Assistindo).
         Devolve copias com path = caminho completo no HD montado agora. */
     function continueList(limit) {
@@ -1342,7 +1367,7 @@ var ProgressStore = (function () {
         for (var p in cache) {
             if (!cache.hasOwnProperty(p)) { continue; }
             var r = cache[p];
-            if (r && !r.done && r.position >= 1000) {
+            if (r && !r.done && !r.hidden && r.position >= 1000) {
                 var c = {};
                 for (var f in r) { if (r.hasOwnProperty(f)) { c[f] = r[f]; } }
                 c.path = fullOf(p);
@@ -1357,7 +1382,7 @@ var ProgressStore = (function () {
     function clearAll()   { cache = {}; persist(true); }
 
     return {
-        save: save, get: get, markComplete: markComplete,
+        save: save, get: get, markComplete: markComplete, setDone: setDone, hide: hide,
         continueList: continueList, remove: remove, clearAll: clearAll,
         loadFromDisk: loadFromDisk, flush: flush
     };
@@ -2307,6 +2332,8 @@ function scanUsb() {
                                 lib ? 'ok' : 'error');
                 ThumbsFolder.load(base, true);      // true = reindexa (capas/legendas/skip novos)
                 SkipData.load(base, true);
+                Meta.load(base, true);
+                Library.scan(base);
                 SubsFolder.load(base, true);
                 ProgressStore.loadFromDisk(base);
                 enterDirectory(base);

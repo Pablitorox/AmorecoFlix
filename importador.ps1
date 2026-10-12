@@ -732,6 +732,13 @@ function Do-Import {
                 try { & $capas -ApiKey $tmdbKey -Root $HdRoot -Only $show *>&1 | ForEach-Object { Log "    $_" } } catch { Log "  capa da temporada falhou: $($_.Exception.Message)" }
             }
         }
+        # sinopse, titulos dos episodios e fundo 16:9 para o app (meta\biblioteca.json)
+        $metaPs = Join-Path $PSScriptRoot 'metadados.ps1'
+        if ($ok -and $tmdbKey -and (Test-Path -LiteralPath $metaPs)) {
+            Log 'Atualizando metadados (TMDB)...'
+            try { & $metaPs -ApiKey $tmdbKey -Root $HdRoot -Only $show *>&1 | Where-Object { "$_" -match '^\s*(OK|\?|!)' } | ForEach-Object { Log "    $_" } }
+            catch { Log "  metadados falharam: $($_.Exception.Message)" }
+        }
     } finally {
         $prog.Value = 0
         $script:busy = $false
