@@ -116,7 +116,7 @@
 
         <!-- Aviso de fim de video / proximo episodio -->
         <div id="next-toast" class="next-toast hidden">
-            <p>Reproduzindo a seguir</p>
+            <p id="next-toast-title">Reproduzindo a seguir</p>
             <strong id="next-toast-name"></strong>
             <div class="next-toast-actions" data-nav-group="toast">
                 <button id="btn-toast-play" class="pc-btn pc-btn-ring focusable">
@@ -131,10 +131,14 @@
                 </button>
                 <button id="btn-toast-cancel" class="pc-btn focusable">Cancelar</button>
             </div>
+            <span class="next-toast-hint">OK para assistir &nbsp;•&nbsp; &#9650; para ocultar</span>
         </div>
     </div>
 
     <div id="spinner" class="spinner hidden"><div class="spinner-dot"></div></div>
+
+    <!-- Aviso curto (UI.toast) - fora das telas p/ aparecer na inicial e no player -->
+    <div id="app-toast" class="app-toast" hidden></div>
 
     <!-- Menu de contexto (segurar OK num item de "Continuar assistindo") -->
     <div id="ctx-menu" class="ctx-menu" hidden>

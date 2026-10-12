@@ -57,23 +57,9 @@ $AUDIO_ALTO_RISCO = @('dts','dts-hd','truehd','eac3_ddp')  # 'eac3_ddp' raro, so
 # suporte incerto
 $AUDIO_VERIFICAR  = @('flac','vorbis','opus','wmav1','wmav2')
 
-function Find-Ffprobe {
-    $p = (Get-Command ffprobe -ErrorAction SilentlyContinue).Source
-    if (-not $p) {
-        $b = Get-ChildItem "$env:LOCALAPPDATA\Microsoft\WinGet\Packages\Gyan.FFmpeg_*" -Recurse -Filter ffprobe.exe -ErrorAction SilentlyContinue | Select-Object -First 1
-        if ($b) { $p = $b.FullName }
-    }
-    return $p
-}
-
-function Find-Ffmpeg {
-    $p = (Get-Command ffmpeg -ErrorAction SilentlyContinue).Source
-    if (-not $p) {
-        $b = Get-ChildItem "$env:LOCALAPPDATA\Microsoft\WinGet\Packages\Gyan.FFmpeg_*" -Recurse -Filter ffmpeg.exe -ErrorAction SilentlyContinue | Select-Object -First 1
-        if ($b) { $p = $b.FullName }
-    }
-    return $p
-}
+. (Join-Path $PSScriptRoot 'lib.ps1')
+function Find-Ffprobe { return (Find-FfTool 'ffprobe') }
+function Find-Ffmpeg  { return (Find-FfTool 'ffmpeg') }
 
 # Decodifica trechos do video pra pegar corrupcao/truncamento que o ffprobe
 # (so le cabecalho/metadados) nao detecta. -Deep sonda mais pontos - mais

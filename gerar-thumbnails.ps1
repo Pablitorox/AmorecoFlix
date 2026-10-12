@@ -22,12 +22,9 @@ param(
 $ErrorActionPreference = 'Continue'
 $exts = @('.mp4','.mkv','.avi','.mov','.m4v','.ts','.webm','.wmv','.flv','.mpg','.mpeg','.m2ts','.3gp')
 
-$ffmpeg  = (Get-Command ffmpeg  -ErrorAction SilentlyContinue).Source
-$ffprobe = (Get-Command ffprobe -ErrorAction SilentlyContinue).Source
-if (-not $ffmpeg) {
-    $b = Get-ChildItem "$env:LOCALAPPDATA\Microsoft\WinGet\Packages\Gyan.FFmpeg_*" -Recurse -Filter ffmpeg.exe -ErrorAction SilentlyContinue | Select-Object -First 1
-    if ($b) { $ffmpeg = $b.FullName; $ffprobe = Join-Path $b.Directory 'ffprobe.exe' }
-}
+. (Join-Path $PSScriptRoot 'lib.ps1')
+$ffmpeg  = Find-FfTool 'ffmpeg'
+$ffprobe = Find-FfTool 'ffprobe'
 if (-not $ffmpeg) { Write-Error "ffmpeg nao encontrado. Rode: winget install Gyan.FFmpeg"; exit 1 }
 if (-not (Test-Path $Root)) { Write-Error "pasta nao existe: $Root"; exit 1 }
 

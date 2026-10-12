@@ -17,16 +17,12 @@ param(
 )
 
 $ErrorActionPreference = 'Continue'
-. (Join-Path $PSScriptRoot 'tmdb-key.ps1')
+. (Join-Path $PSScriptRoot 'lib.ps1')
 if (-not $ApiKey) { $ApiKey = Get-TmdbApiKey }
 if (-not $ApiKey) { Write-Error "Informe -ApiKey ou crie .env com TMDB_API_KEY=..."; exit 1 }
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
-$ffmpeg = (Get-Command ffmpeg -ErrorAction SilentlyContinue).Source
-if (-not $ffmpeg) {
-    $b = Get-ChildItem "$env:LOCALAPPDATA\Microsoft\WinGet\Packages\Gyan.FFmpeg_*" -Recurse -Filter ffmpeg.exe -ErrorAction SilentlyContinue | Select-Object -First 1
-    if ($b) { $ffmpeg = $b.FullName }
-}
+$ffmpeg = Find-FfTool 'ffmpeg'
 if (-not $ffmpeg) { Write-Error "ffmpeg nao encontrado"; exit 1 }
 New-Item -ItemType Directory -Force -Path $ThumbsDir | Out-Null
 

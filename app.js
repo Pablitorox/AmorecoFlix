@@ -72,15 +72,15 @@ var App = {
     skipDone:     {},       // {op:true} intervalos ja pulados
     tracks:       { audio: [], text: [] },   // faixas do video atual
     trackSel:     { audio: -1, text: -1 },   // -1 = nao definido / off
-    extSub:       null,     // URI da legenda externa preferida do episodio atual
     extSubs:      [],       // todas as legendas externas: [{name,uri,lang,forced}]
     dirFiles:     [],       // conteudo listado do diretorio atual
     dirImages:    [],       // imagens da pasta (usadas como capa)
-    playlist:     [],       // apenas os videos do diretorio atual (ordenados)
+    playlist:     [],       // videos da pasta do episodio em reproducao (ordenados);
+                            // so muda ao abrir um video, nunca ao navegar
     playingPath:  null,     // fullPath do video em reproducao
-    playingIndex: -1,       // indice do video atual dentro de playlist
-    usingAvplay:  false,    // true = AVPlay, false = fallback <video>
-    saveTimer:    null
+    nextEp:       null,     // proximo episodio do atual (card dos creditos)
+    nextSeason:   null,     // { entry, list } 1o episodio da proxima temporada (outra pasta)
+    usingAvplay:  false     // true = AVPlay, false = fallback <video>
 };
 
 
@@ -177,11 +177,7 @@ function listDirectory(dir, onDone) {
     });
 }
 
-function isVideoFile(name) {
-    var dot = name.lastIndexOf('.');
-    if (dot < 0) { return false; }
-    return VIDEO_EXT.indexOf(name.slice(dot + 1).toLowerCase()) !== -1;
-}
+function isVideoFile(name) { return VIDEO_EXT.indexOf(ext(name)) !== -1; }
 
 /* Ordenacao natural: "S01E02" antes de "S01E10". */
 function compareEntries(a, b) {
@@ -271,6 +267,8 @@ var Player = (function () {
      */
     function load(fileUri, resumeFromMs, onEnded) {
         resumeMs  = resumeFromMs || 0;
+        resumeGuard   = (validMs(resumeMs) && resumeMs >= 1000) ? resumeMs : 0;
+        resumeAttempt = null;
         if (seekKnownBad(fileUri, resumeMs)) {
             console.warn('[Player] pulando seek de retomada (ja falhou antes nesse ponto):', resumeMs);
             resumeMs = 0;
@@ -301,29 +299,85 @@ var Player = (function () {
     function clearResumeWatchdog() {
         if (resumeSeekWatchdog) { clearTimeout(resumeSeekWatchdog); resumeSeekWatchdog = null; }
     }
-    /* O onerror do AVPlay para um seek de retomada ruim demorou de 1s a quase
-     * 50s pra disparar em testes reais (provavelmente o player tenta de novo
-     * sozinho por dentro antes de desistir e avisar). Em vez de depender
-     * desse tempo incerto, desiste sozinho em 7s se a retomada nao confirmar
-     * (oncurrentplaytime nao voltou perto do alvo) - marca o alvo como ruim
-     * e reabre do zero, sem esperar o player. */
-    function armResumeWatchdog(targetMs) {
+
+    /* --- retomada ("Continuar assistindo") ---
+     * Seek longo num arquivo grande do USB demora (10-25 s perto do fim), entao:
+     *  - a confirmacao vem do callback do proprio seekTo (sucesso/erro), nao de
+     *    um chute por tempo; o timeout e so uma rede de seguranca (25 s);
+     *  - se o ponto exato falhar, tenta um pouco ANTES (-20 s, -90 s) em vez de
+     *    largar direto no inicio do episodio;
+     *  - so se tudo falhar recomeca do zero, e mesmo assim o ponto salvo NAO e
+     *    sobrescrito (resumeGuard) - da pra tentar de novo depois. */
+    var RESUME_BACKOFF = [0, 20000, 90000];
+    var RESUME_TIMEOUT = 25000;
+    var resumeGuard   = 0;      // ponto salvo a proteger enquanto a retomada nao confirmou
+    var resumeAttempt = null;   // { target, attempt, ms } da tentativa em andamento
+    var loadGen       = 0;      // descarta callbacks de uma abertura anterior
+
+    function armResumeWatchdog() {
         clearResumeWatchdog();
         resumeSeekWatchdog = setTimeout(function () {
             resumeSeekWatchdog = null;
-            if (seekingUntil && seekTarget === targetMs) {
-                console.warn('[Player] retomada nao confirmou em 7s, comecando do zero:', targetMs);
-                rememberFailedSeek(currentUri, targetMs);
-                seekingUntil = 0;
-                resumeMs = 0;
-                loadAvplay(currentUri);
+            if (resumeAttempt) {
+                console.warn('[Player] retomada sem confirmacao em ' + (RESUME_TIMEOUT / 1000) + 's:', resumeAttempt.ms);
+                resumeFail();
             }
-        }, 7000);
+        }, RESUME_TIMEOUT);
+    }
+
+    function resumeSeek(target, attempt) {
+        var tryMs = Math.max(1000, target - RESUME_BACKOFF[attempt]);
+        var gen = loadGen;
+        resumeAttempt = { target: target, attempt: attempt, ms: tryMs };
+        pendingSeek  = tryMs;
+        seekTarget   = tryMs;
+        seekingUntil = Date.now() + RESUME_TIMEOUT + 5000;
+        armResumeWatchdog();
+        try {
+            avplay.seekTo(tryMs, function () {
+                if (gen !== loadGen || !resumeAttempt) { return; }
+                console.log('[Player] retomada confirmada em', tryMs);
+                resumeOk();
+            }, function (err) {
+                if (gen !== loadGen || !resumeAttempt) { return; }
+                console.warn('[Player] seek de retomada recusado em', tryMs, err && err.message);
+                resumeFail();
+            });
+            position = tryMs;
+        } catch (e) {
+            console.error('[AVPlay] seekTo inicial', e);
+            resumeFail();
+        }
+    }
+
+    function resumeOk() {
+        clearResumeWatchdog();
+        resumeAttempt = null;
+        pendingSeek   = 0;             // seekingUntil segue ate o playtime voltar (spinner + sem falso "travou")
+    }
+
+    function resumeFail() {
+        clearResumeWatchdog();
+        var r = resumeAttempt;
+        if (!r) { return; }
+        if (r.attempt + 1 < RESUME_BACKOFF.length) {
+            console.warn('[Player] tentando retomar um pouco antes do ponto salvo...');
+            resumeSeek(r.target, r.attempt + 1);
+            return;
+        }
+        resumeAttempt = null;
+        pendingSeek   = 0;
+        seekingUntil  = 0;
+        resumeMs      = 0;
+        UI.toast('Nao consegui retomar do ponto salvo. Ele continua salvo: use avancar.');
+        loadAvplay(currentUri);                  // recomeca do zero (resumeGuard protege o ponto salvo)
     }
 
     function loadAvplay(fileUri) {
         try { avplay.close(); } catch (e) {}
         clearResumeWatchdog();
+        loadGen++;
+        resumeAttempt = null;
 
         currentUri  = fileUri;
         started     = false;
@@ -353,6 +407,7 @@ var Player = (function () {
             onerror: function (err) {
                 clearWatchdog();
                 console.error('[AVPlay] erro:', err);
+                if (resumeAttempt) { resumeFail(); return; }   // erro durante a retomada: proxima tentativa
                 UI.showSpinner(false);
                 saveProgress();                       // nao perde o ponto atual
                 // erro bateu com um seek de retomada em andamento: provavelmente
@@ -394,6 +449,7 @@ var Player = (function () {
                     seekingUntil = 0;              // seek concluiu, playtime voltou
                     stallSince = 0;
                     clearResumeWatchdog();
+                    resumeAttempt = null;
                     UI.showSpinner(false);
                 }
                 if (pendingSeek) {
@@ -409,6 +465,7 @@ var Player = (function () {
                 position = ms;
                 UI.updateProgress(position, duration);
                 UI.updateSkip(position, duration);
+                UI.updateCredits(position, duration);
             }
         });
 
@@ -427,10 +484,7 @@ var Player = (function () {
             // retomada: faz o seek AGORA (estado READY), antes do play().
             // onbufferingcomplete durante o prepare roda com duration=0 e nao seekava.
             if (pendingSeek && duration > 0 && pendingSeek < duration - 2000) {
-                seekTarget = pendingSeek; seekingUntil = Date.now() + 20000;
-                try { avplay.seekTo(pendingSeek); position = pendingSeek; }
-                catch (e) { console.error('[AVPlay] seekTo inicial', e); }
-                armResumeWatchdog(pendingSeek);
+                resumeSeek(pendingSeek, 0);
             } else {
                 pendingSeek = 0;
             }
@@ -458,6 +512,7 @@ var Player = (function () {
             position = Math.floor(html5.currentTime * 1000);
             UI.updateProgress(position, duration);
             UI.updateSkip(position, duration);
+            UI.updateCredits(position, duration);
         });
         html5.addEventListener('ended', handleEnded);
         html5.addEventListener('waiting', function () { UI.showSpinner(true); });
@@ -481,6 +536,7 @@ var Player = (function () {
         }
         isPaused = !isPaused;
         saveProgress();                       // grava sempre que pausa/despausa
+        ProgressStore.flush();                // ...e ja manda pro HD
         return isPaused;
     }
 
@@ -646,6 +702,8 @@ var Player = (function () {
 
     function seekTo(ms) {
         var target = Math.max(0, Math.min(ms, duration - 1000));
+        resumeGuard = 0;                       // o usuario assumiu o controle da posicao
+        if (resumeAttempt) { clearResumeWatchdog(); resumeAttempt = null; pendingSeek = 0; }
         if (App.usingAvplay) {
             markSeek(target);
             try { avplay.seekTo(target); } catch (e) { console.error('[AVPlay] seekTo', e); }
@@ -657,6 +715,7 @@ var Player = (function () {
 
     function stop(saveFirst) {
         if (saveFirst !== false) { saveProgress(); }
+        ProgressStore.flush();
         stopTick();
         clearWatchdog();
         clearResumeWatchdog();
@@ -746,6 +805,8 @@ var Player = (function () {
 
     function saveProgress() {
         if (!App.playingPath || duration <= 0) { return; }
+        // retomada ainda nao confirmada / caiu no comeco: nao sobrescreve o ponto salvo
+        if (resumeGuard && position < resumeGuard - 30000) { return; }
         ProgressStore.save({
             path:     App.playingPath,
             name:     baseName(App.playingPath),
@@ -785,9 +846,12 @@ var ProgressStore = (function () {
 
     var KEY = 'meuplayer.progress.v1';
     var FILE_NAME = 'progresso.json';
+    var BAK_NAME  = 'progresso.bak.json';   // copia do anterior: se faltar energia no meio da gravacao
+    var DISK_EVERY = 30000;                 // localStorage a cada save; HD no maximo a cada 30 s
     var cache = load();
     var libDir = null;
     var writing = false, pendingWrite = false;
+    var dirty = false, lastDisk = 0;
 
     function load() {
         try { return JSON.parse(localStorage.getItem(KEY)) || {}; }
@@ -798,77 +862,106 @@ var ProgressStore = (function () {
         catch (e) { console.error('[Store] localStorage cheio?', e); }
     }
 
-    /* chamado 1x pelo scanUsb() assim que a pasta AmorecoFlix e encontrada -
+    /* chamado pelo scanUsb() assim que a pasta AmorecoFlix e encontrada -
        o arquivo no HD manda: se existir, substitui o que tiver no cache
-       (inclusive o que veio do localStorage, que pode estar desatualizado) */
+       (inclusive o que veio do localStorage, que pode estar desatualizado).
+       progresso.json corrompido (queda de energia na gravacao) -> usa o .bak. */
     function loadFromDisk(libraryDir) {
         libDir = libraryDir;
         if (!libDir || !libDir.fullPath) { return; }
-        var path = libDir.fullPath + '/' + FILE_NAME;
-        try {
-            tizen.filesystem.resolve(path, function (f) {
-                f.openStream('r', function (s) {
-                    var txt = '';
-                    try { txt = s.read(s.bytesAvailable || 5000000); } catch (e) {}
-                    s.close();
-                    try {
-                        cache = JSON.parse(txt) || {};
-                        persistLocal();
-                        console.log('[Store] progresso carregado do HD (' + Object.keys(cache).length + ' itens)');
-                        if (window.UI && UI.renderContinue) { UI.renderContinue(); }
-                    } catch (e) { console.warn('[Store] progresso.json invalido:', e && e.message); }
-                }, function () {}, 'UTF-8');
+        if (dirty) { flush(); return; }          // reescaneio com algo ainda nao gravado: o local e mais novo
+        var base = libDir.fullPath + '/';
+
+        function use(obj, from) {
+            cache = obj;
+            persistLocal();
+            console.log('[Store] progresso carregado do HD (' + from + ', ' + Object.keys(cache).length + ' itens)');
+            if (window.UI && UI.renderContinue) { UI.renderContinue(); }
+        }
+        function parse(txt) {
+            try { var o = JSON.parse(txt); return (o && typeof o === 'object') ? o : null; }
+            catch (e) { return null; }
+        }
+        function tryBackup(mainExists) {
+            readTextFile(base + BAK_NAME, function (txt) {
+                var o = parse(txt);
+                if (o) { use(o, BAK_NAME); writeToDisk(); return; }   // reconstroi o principal
+                console.warn('[Store] progresso.json e .bak invalidos - mantendo o cache local');
+                if (Object.keys(cache).length) { writeToDisk(); }
             }, function () {
+                if (mainExists) { console.warn('[Store] progresso.json invalido e sem .bak'); }
                 /* ainda nao existe no HD - se ja tem progresso local (versao
                    anterior a essa mudanca), migra pra ele agora */
                 if (Object.keys(cache).length) { writeToDisk(); }
-            }, 'r');
-        } catch (e) { console.warn('[Store] erro lendo progresso.json:', e && e.message); }
+            });
+        }
+        readTextFile(base + FILE_NAME, function (txt) {
+            var o = parse(txt);
+            if (o) { use(o, FILE_NAME); } else { tryBackup(true); }
+        }, function () { tryBackup(false); });
     }
 
-    function writeToDisk() {
-        if (!libDir || !libDir.fullPath) { return; }
-        if (writing) { pendingWrite = true; return; }
-        writing = true;
-        var json = JSON.stringify(cache);
-        var path = libDir.fullPath + '/' + FILE_NAME;
-
-        function afterWrite() {
-            writing = false;
-            if (pendingWrite) { pendingWrite = false; writeToDisk(); }
-        }
+    /* grava o conteudo inteiro num arquivo da biblioteca (cria se nao existir) */
+    function writeFile(name, json, done) {
+        var path = libDir.fullPath + '/' + name;
         function doWrite(fileObj) {
             try {
                 fileObj.openStream('w', function (s) {
-                    try { s.write(json); } catch (e) {}
-                    s.close();
-                    afterWrite();
+                    try { s.write(json); } catch (e) { console.warn('[Store] erro escrevendo ' + name + ':', e && e.message); }
+                    try { s.close(); } catch (e) {}
+                    done();
                 }, function (e) {
-                    console.warn('[Store] erro abrindo progresso.json p/ escrita:', e && e.message);
-                    afterWrite();
+                    console.warn('[Store] erro abrindo ' + name + ' p/ escrita:', e && e.message);
+                    done();
                 }, 'UTF-8');
-            } catch (e) { console.warn('[Store] erro escrevendo progresso.json:', e && e.message); afterWrite(); }
+            } catch (e) { console.warn('[Store] erro escrevendo ' + name + ':', e && e.message); done(); }
         }
         try {
-            tizen.filesystem.resolve(path, function (f) { doWrite(f); }, function () {
+            tizen.filesystem.resolve(path, doWrite, function () {
                 try {
                     tizen.filesystem.resolve(libDir.fullPath, function (dir) {
-                        doWrite(dir.createFile(FILE_NAME));
-                    }, function (e) { console.warn('[Store] erro criando progresso.json:', e && e.message); afterWrite(); }, 'rw');
-                } catch (e) { afterWrite(); }
+                        doWrite(dir.createFile(name));
+                    }, function (e) { console.warn('[Store] erro criando ' + name + ':', e && e.message); done(); }, 'rw');
+                } catch (e) { done(); }
             }, 'rw');
-        } catch (e) { console.warn('[Store] erro geral escrevendo progresso.json:', e && e.message); afterWrite(); }
+        } catch (e) { console.warn('[Store] erro geral escrevendo ' + name + ':', e && e.message); done(); }
     }
 
-    function persist() {
-        persistLocal();
+    /* principal primeiro, depois o .bak: uma queda de energia so corrompe
+       um dos dois, e o outro tem no maximo a gravacao anterior */
+    function writeToDisk() {
+        if (!libDir || !libDir.fullPath || !window.tizen) { return; }
+        if (writing) { pendingWrite = true; return; }
+        writing = true;
+        var json = JSON.stringify(cache);
+        writeFile(FILE_NAME, json, function () {
+            writeFile(BAK_NAME, json, function () {
+                writing = false;
+                if (pendingWrite) { pendingWrite = false; writeToDisk(); }
+            });
+        });
+    }
+
+    /* grava no HD agora, se houver algo pendente (pausa, parada, saida do app) */
+    function flush() {
+        if (!dirty) { return; }
+        dirty = false;
+        lastDisk = Date.now();
         writeToDisk();
+    }
+
+    /* localStorage sempre; HD no maximo a cada DISK_EVERY (o Player salva a
+       cada 3 s - regravar o arquivo inteiro no HD USB nesse ritmo e desperdicio) */
+    function persist(urgent) {
+        persistLocal();
+        dirty = true;
+        if (urgent || Date.now() - lastDisk >= DISK_EVERY) { flush(); }
     }
 
     /** Salva/atualiza o registro de um arquivo. */
     function save(rec) {
         cache[rec.path] = rec;
-        persist();
+        persist(false);
     }
 
     /** Retorna o registro de um arquivo (ou null). */
@@ -882,7 +975,7 @@ var ProgressStore = (function () {
             cache[path].done = true;
             cache[path].position = 0;
             cache[path].updated = Date.now();
-            persist();
+            persist(true);
         }
     }
 
@@ -892,19 +985,19 @@ var ProgressStore = (function () {
         for (var p in cache) {
             if (!cache.hasOwnProperty(p)) { continue; }
             var r = cache[p];
-            if (!r.done && r.position >= 1000) { arr.push(r); }
+            if (r && !r.done && r.position >= 1000) { arr.push(r); }
         }
         arr.sort(function (a, b) { return b.updated - a.updated; });
         return limit ? arr.slice(0, limit) : arr;
     }
 
-    function remove(path) { delete cache[path]; persist(); }
-    function clearAll()   { cache = {}; persist(); }
+    function remove(path) { delete cache[path]; persist(true); }
+    function clearAll()   { cache = {}; persist(true); }
 
     return {
         save: save, get: get, markComplete: markComplete,
         continueList: continueList, remove: remove, clearAll: clearAll,
-        loadFromDisk: loadFromDisk
+        loadFromDisk: loadFromDisk, flush: flush
     };
 })();
 
@@ -943,34 +1036,47 @@ function langName(code, fallback) {
  *    Assume nomenclatura tipo S01E01 / S01E02 e ordem alfabetica natural.
  * ==========================================================================*/
 
+/* Proximo arquivo da playlist (pasta do episodio atual). No ultimo episodio
+ * da pasta, cai no 1o da proxima temporada, se findNextSeason() ja achou. */
 function findNextEpisode(currentPath) {
-    if (!App.playlist.length) { return null; }
-
     var idx = App.playlist.findIndex(function (e) {
         return e.file.fullPath === currentPath;
     });
-    if (idx === -1 || idx + 1 >= App.playlist.length) { return null; }
-
-    var cur  = parseEpisode(App.playlist[idx].name);
-    var next = App.playlist[idx + 1];
-
-    // Se ambos seguem o padrao SxxEyy, confirma que e sequencia coerente.
-    var nextEp = parseEpisode(next.name);
-    if (cur && nextEp) {
-        var sameSeasonNext = (nextEp.season === cur.season && nextEp.ep === cur.ep + 1);
-        var newSeasonNext  = (nextEp.season === cur.season + 1);
-        if (!sameSeasonNext && !newSeasonNext) {
-            // fora do padrao esperado -> ainda assim oferece o proximo arquivo
-            console.log('[Next] sequencia nao-linear, usando proximo por ordem.');
-        }
-    }
-    return next;
+    if (idx !== -1 && idx + 1 < App.playlist.length) { return App.playlist[idx + 1]; }
+    return (App.nextSeason && App.playingPath === currentPath) ? App.nextSeason.entry : null;
 }
 
-function parseEpisode(name) {
-    var m = /[sS](\d{1,2})[\s._-]*[eE](\d{1,3})/.exec(name);
-    if (!m) { return null; }
-    return { season: parseInt(m[1], 10), ep: parseInt(m[2], 10) };
+/* numero da temporada pelo nome da pasta: "Show - 2ª Temporada", "Temporada 2",
+ * "Season 2", "S02". 0 = nao e pasta de temporada. */
+function seasonNumber(name) {
+    var m = /(\d{1,2})\s*[ªºa°]?\s*temporada/i.exec(name) ||
+            /temporada\s*(\d{1,2})/i.exec(name) ||
+            /season\s*(\d{1,2})/i.exec(name) ||
+            /\bS(\d{1,2})\b/i.exec(name);
+    return m ? parseInt(m[1], 10) : 0;
+}
+
+/* Cada temporada fica na propria pasta, entao o ultimo episodio de uma nao
+ * tem "proximo" na playlist. Procura a pasta irma da temporada seguinte e
+ * devolve (async) o 1o episodio dela + a lista completa. */
+function findNextSeason(currentPath, cb) {
+    var seasonDir = dirName(currentPath), showDir = dirName(seasonDir);
+    var cur = seasonNumber(baseName(seasonDir));
+    if (!cur || !showDir || !(window.tizen && tizen.filesystem)) { return; }
+    try {
+        tizen.filesystem.resolve(showDir, function (dir) {
+            listDirectory(dir, function (entries) {
+                var target = entries.filter(function (e) {
+                    return e.isDir && seasonNumber(e.name) === cur + 1;
+                })[0];
+                if (!target) { return; }
+                listDirectory(target.file, function (eps) {
+                    var list = eps.filter(function (e) { return !e.isDir; });
+                    if (list.length) { cb(list[0], list); }
+                });
+            });
+        }, function (e) { console.warn('[Next] pasta da serie:', e && e.message); }, 'r');
+    } catch (e) { console.warn('[Next] proxima temporada:', e && e.message); }
 }
 
 
@@ -1038,12 +1144,9 @@ var ContentIndex = (function () {
         w.forEach(function (fn) { try { fn(); } catch (e) {} });
     }
 
-    /* mantido por compatibilidade - so consulta 1x, sem re-scan por pasta */
-    function refresh(dirFile, done) { query(done); }
-
     function get(fullPath) { return map[key(fullPath)] || null; }
 
-    return { refresh: refresh, query: query, get: get };
+    return { query: query, get: get };
 })();
 
 
@@ -1185,8 +1288,11 @@ var ThumbsFolder = (function () {
     var map = null;            // "nome do video.mkv" (lower) -> uri ; null = nao carregado
     var loading = false;
 
-    function load(libDir) {
-        if (map !== null || loading || !libDir || !libDir.listFiles) { return; }
+    /* force = reescaneou (tecla VERMELHA / HD trocado): reindexa capas novas.
+       O mapa antigo continua valendo ate o novo ficar pronto. */
+    function load(libDir, force) {
+        if (loading || !libDir || !libDir.listFiles) { return; }
+        if (map !== null && !force) { return; }
         loading = true;
         libDir.listFiles(function (files) {
             for (var i = 0; i < files.length; i++) {
@@ -1239,22 +1345,19 @@ var ThumbsFolder = (function () {
 var SkipData = (function () {
     var map = null;   // "nome do arquivo" (lower) -> { op:[iniSeg,fimSeg], ed:[...] }
 
-    function load(libDir) {
-        if (map !== null || !libDir || !libDir.resolve) { return; }
-        try {
-            libDir.resolve('skip.json', function (f) {
-                f.openStream('r', function (s) {
-                    var txt = s.read(s.bytesAvailable || 5000000);
-                    s.close();
-                    try {
-                        var raw = JSON.parse(String(txt).replace(/^﻿/, '')), m = {};
-                        for (var k in raw) { if (raw.hasOwnProperty(k)) { m[k.toLowerCase()] = raw[k]; } }
-                        map = m;
-                        console.log('[skip] skip.json:', Object.keys(map).length, 'episodios');
-                    } catch (e) { console.warn('[skip] json invalido:', e && e.message); map = {}; }
-                }, function () { map = {}; }, 'UTF-8');
-            }, function () { console.log('[skip] skip.json ausente'); map = {}; });
-        } catch (e) { map = {}; }
+    /* force = reescaneou: rele o skip.json (creditos/aberturas recem-detectados) */
+    function load(libDir, force) {
+        if (!libDir || !libDir.fullPath) { return; }
+        if (map !== null && !force) { return; }
+        if (map === null) { map = {}; }              // o mapa antigo vale ate o novo chegar
+        readTextFile(libDir.fullPath + '/skip.json', function (txt) {
+            try {
+                var raw = JSON.parse(txt), m = {};
+                for (var k in raw) { if (raw.hasOwnProperty(k)) { m[k.toLowerCase()] = raw[k]; } }
+                map = m;
+                console.log('[skip] skip.json:', Object.keys(map).length, 'episodios');
+            } catch (e) { console.warn('[skip] json invalido:', e && e.message); }
+        }, function () { console.log('[skip] skip.json ausente'); map = {}; });
     }
 
     function get(videoName) {
@@ -1281,8 +1384,10 @@ var SubsFolder = (function () {
     var SUB_RE  = /\.(srt|ass|ssa|vtt|sub)$/i;
     var TOKEN_RE = /\.([a-z-]{2,10})$/i;
 
-    function load(libDir) {
-        if (map !== null || loading || !libDir || !libDir.listFiles) { return; }
+    /* force = reescaneou: reindexa legendas novas (o mapa antigo vale ate o novo ficar pronto) */
+    function load(libDir, force) {
+        if (loading || !libDir || !libDir.listFiles) { return; }
+        if (map !== null && !force) { return; }
         loading = true;
         libDir.listFiles(function (files) {
             for (var i = 0; i < files.length; i++) {
@@ -1384,6 +1489,7 @@ var UI = (function () {
         spinner:     document.getElementById('spinner'),
         nextToast:   document.getElementById('next-toast'),
         nextToastNm: document.getElementById('next-toast-name'),
+        nextToastTitle: document.getElementById('next-toast-title'),
         skipBtn:     document.getElementById('skip-btn')
     };
 
@@ -1815,6 +1921,39 @@ var UI = (function () {
 
     function skipVisible() { return skipShown; }
 
+    /* --- Card "Proximo episodio" ao comecar os creditos ---
+     * Momento: 1) fim do encerramento (ed) de anime, 2) cr[0] detectado por
+     * detectar-creditos.ps1, 3) padrao: 45 s antes do fim. Sem autoplay: o card
+     * espera OK (assistir) ou ▲ (ocultar); o autoplay de 5 s continua so no fim. */
+    var creditsShown = false, creditsDismissed = false;
+
+    function creditsStart(durSec) {
+        var s = App.skip, at = null;
+        if (s && s.ed && s.ed[1] > durSec - 240 && s.ed[1] < durSec - 5) { at = s.ed[1]; }
+        else if (s && s.cr && s.cr[0] > durSec * 0.5 && s.cr[0] < durSec - 5) { at = s.cr[0]; }
+        else { at = Math.max(durSec - 45, durSec * 0.9); }
+        return Math.min(at, durSec - 10);
+    }
+
+    function updateCredits(posMs, durMs) {
+        if (durMs <= 0 || !App.nextEp) { return; }
+        var sec = posMs / 1000, at = creditsStart(durMs / 1000);
+        if (sec < at - 3) {                                   // voltou antes dos creditos
+            creditsDismissed = false;
+            if (creditsShown) { hideNextToast(); }
+            return;
+        }
+        if (creditsShown || creditsDismissed || sec < at || sec >= durMs / 1000 - 0.5) { return; }
+        var next = App.nextEp;
+        creditsShown = true;
+        hideSkip();
+        showNextToast(next, function () { playNextEpisode(true); }, true);
+    }
+
+    function creditsVisible() { return creditsShown; }
+    function dismissCredits() { creditsDismissed = true; hideNextToast(); }
+    function resetCredits() { creditsShown = false; creditsDismissed = false; }
+
     /* --- Painel de audio e legendas --- */
     var settingsShown = false;
 
@@ -1905,11 +2044,16 @@ var UI = (function () {
 
     function hideNextToast() {
         clearNextToastTimer();
+        creditsShown = false;
         el.nextToast.classList.add('hidden');
+        if (document.activeElement === btnToastPlay && btnToastPlay.blur) { btnToastPlay.blur(); }
     }
 
-    function showNextToast(entry, onPlay) {
+    function showNextToast(entry, onPlay, atCredits) {
         var ep = epLabel(entry.name);
+        el.nextToast.classList.toggle('credits', !!atCredits);
+        if (!atCredits) { creditsShown = false; }
+        el.nextToastTitle.textContent = atCredits ? 'Proximo episodio' : 'Reproduzindo a seguir';
         el.nextToastNm.textContent = cleanName(entry.name) + (ep ? '  •  ' + ep : '');
         el.nextToast.classList.remove('hidden');
         var btnPlay   = btnToastPlay;
@@ -1917,6 +2061,10 @@ var UI = (function () {
         var secsLeft  = AUTOPLAY_SECS;
 
         clearNextToastTimer();
+
+        if (atCredits) {                       // sem contagem: espera OK / ▲
+            btnPlay.onclick = function () { hideNextToast(); onPlay(); };            return;
+        }
 
         // reseta o anel pro estado "cheio" sem animar, depois liga a transicao
         ringFill.style.transition = 'none';
@@ -1943,11 +2091,14 @@ var UI = (function () {
         Nav.focusFirst('toast');
     }
 
+    /* aviso curto: elemento proprio (#app-toast), fora das telas - nao mexe
+       no card de proximo episodio nem no estado dele (creditsShown etc.) */
+    var appToast = document.getElementById('app-toast'), appToastTimer = null;
     function toast(msg) {
-        clearNextToastTimer();
-        el.nextToastNm.textContent = msg;
-        el.nextToast.classList.remove('hidden');
-        setTimeout(function () { el.nextToast.classList.add('hidden'); }, 3500);
+        appToast.textContent = msg;
+        appToast.hidden = false;
+        if (appToastTimer) { clearTimeout(appToastTimer); }
+        appToastTimer = setTimeout(function () { appToastTimer = null; appToast.hidden = true; }, 3500);
     }
 
     return {
@@ -1963,6 +2114,8 @@ var UI = (function () {
         buildSettings: buildSettings, openSettings: openSettings,
         closeSettings: closeSettings, settingsOpen: settingsOpen,
         updateSkip: updateSkip, hideSkip: hideSkip, doSkip: doSkip, skipVisible: skipVisible,
+        updateCredits: updateCredits, creditsVisible: creditsVisible,
+        dismissCredits: dismissCredits, resetCredits: resetCredits,
         showNextToast: showNextToast, hideNextToast: hideNextToast, toast: toast, el: el
     };
 })();
@@ -2187,6 +2340,12 @@ function onKeyDown(ev) {
         // desde que o foco nao esteja nos controles da barra
         if (UI.skipVisible() && !ctrl && code === KEY.ENTER) { UI.doSkip(); return; }
 
+        // card "Proximo episodio" nos creditos: OK assiste, ▲ oculta
+        if (UI.creditsVisible() && !ctrl) {
+            if (code === KEY.ENTER) { playNextEpisode(true); return; }
+            if (code === KEY.UP)    { UI.dismissCredits(); return; }
+        }
+
         // 1a tecla quando a HUD esta escondida: so revela (exceto play/pause)
         if (PlayerHud.isFaded() && !UI.skipVisible() &&
             code !== KEY.PLAY && code !== KEY.PAUSE && code !== KEY.PLAYPAUSE) {
@@ -2307,13 +2466,14 @@ function boot() {
         }, 400);
     }, true);
 
-    // salva progresso se o app for para segundo plano / fechar
+    // salva progresso (e grava no HD) se o app for para segundo plano / fechar
+    function saveNow() { Player.saveProgress(); ProgressStore.flush(); }
     document.addEventListener('visibilitychange', function () {
-        if (document.hidden) { Player.saveProgress(); }
+        if (document.hidden) { saveNow(); }
     });
-    window.addEventListener('beforeunload', function () { Player.saveProgress(); });
-    window.addEventListener('blur', function () { Player.saveProgress(); });
-    window.addEventListener('pagehide', function () { Player.saveProgress(); });
+    window.addEventListener('beforeunload', saveNow);
+    window.addEventListener('blur', saveNow);
+    window.addEventListener('pagehide', saveNow);
 
     // detecta USB conectado/removido em tempo real
     if (window.tizen && tizen.filesystem && tizen.filesystem.addStorageStateChangeListener) {
@@ -2356,9 +2516,9 @@ function scanUsb() {
                 UI.setUsbStatus(lib ? ('Biblioteca: ' + LIBRARY_DIR)
                                     : ('Pasta "' + LIBRARY_DIR + '" nao encontrada no HD.'),
                                 lib ? 'ok' : 'error');
-                ThumbsFolder.load(base);
-                SkipData.load(base);
-                SubsFolder.load(base);
+                ThumbsFolder.load(base, true);      // true = reindexa (capas/legendas/skip novos)
+                SkipData.load(base, true);
+                SubsFolder.load(base, true);
                 ProgressStore.loadFromDisk(base);
                 enterDirectory(base);
             }, function (err) {
@@ -2377,12 +2537,13 @@ function enterDirectory(dir) {
         App.dirFiles  = entries;
         App.dirImages = images || [];
         App.dirSubs   = subs || {};
-        App.playlist  = entries.filter(function (e) { return !e.isDir; });
         UI.renderFileList(entries);
-        Nav.focusFirst('files');
+        // reescaneio (USB/NetUpload) durante o video: atualiza a grade, mas
+        // nao rouba o foco do player
+        if (!isPlayerActive()) { Nav.focusFirst('files'); }
 
         // titulos/duracao do indice da TV (thumb geralmente vem null, sem problema)
-        ContentIndex.refresh(dir, function () {
+        ContentIndex.query(function () {
             UI.decorateCards();
             UI.renderContinue();
         });
@@ -2406,6 +2567,7 @@ function onEntryActivate(index) {
         enterDirectory(entry.file);
     } else {
         var rec = ProgressStore.get(entry.file.fullPath);
+        App.playlist = App.dirFiles.filter(function (e) { return !e.isDir; });
         openVideo(entry, rec ? rec.position : 0);
     }
 }
@@ -2419,13 +2581,27 @@ function goUpDirectory() {
 
 /* --- abertura de video --- */
 
+function isPlayerActive() { return UI.el.playerScreen.classList.contains('active'); }
+
 function openVideo(entry, resumeMs) {
+    // abrindo o 1o episodio da proxima temporada: a playlist passa a ser a pasta dela
+    if (App.nextSeason && entry === App.nextSeason.entry) { App.playlist = App.nextSeason.list; }
+    App.nextSeason = null;
     App.playingPath  = entry.file.fullPath;
-    App.playingIndex = App.playlist.indexOf(entry);
     App.skip = SkipData.get(entry.name);          // { op:[s,e], ed:[s,e] } ou null
     App.skipDone = {};                             // intervalos ja pulados nesta sessao
+    App.nextEp = findNextEpisode(App.playingPath); // p/ o card ao comecar os creditos
+    if (!App.nextEp) {                             // ultimo da pasta: tenta a proxima temporada
+        var path = App.playingPath;
+        findNextSeason(path, function (first, list) {
+            if (App.playingPath !== path) { return; }
+            App.nextSeason = { entry: first, list: list };
+            App.nextEp = first;
+            console.log('[Next] proxima temporada:', first.name);
+        });
+    }
+    UI.resetCredits();
     App.extSubs = findExtSubs(entry.name);         // legendas da pasta central /subs
-    App.extSub  = App.extSubs[0] ? App.extSubs[0].uri : null;
     UI.hideSkip();
     UI.closeSettings();
     UI.showPlayer(entry.name);
@@ -2474,15 +2650,26 @@ function findExtSubs(videoName) {
 /* Reabre pelo path salvo (usado na aba Continuar Assistindo). */
 function openVideoByPath(fullPath, resumeMs) {
     // tenta achar na playlist atual; senao resolve direto pelo caminho
-    var inList = App.playlist.filter(function (e) {
+    var dirVideos = App.dirFiles.filter(function (e) { return !e.isDir; });
+    var inList = dirVideos.filter(function (e) {
         return e.file.fullPath === fullPath;
     })[0];
-    if (inList) { openVideo(inList, resumeMs); return; }
+    if (inList) { App.playlist = dirVideos; openVideo(inList, resumeMs); return; }
 
     tizen.filesystem.resolve('file://' + fullPath, function (file) {
         var pseudo = { file: file, name: file.name, isDir: false };
         App.playlist = [pseudo];
-        openVideo(pseudo, resumeMs);
+        // monta a playlist da pasta do arquivo: sem isso nao existe "proximo episodio"
+        // (card dos creditos / autoplay) quando se entra por "Continuar assistindo"
+        var parent = null;
+        try { parent = file.parent; } catch (e) {}
+        if (!parent) { openVideo(pseudo, resumeMs); return; }
+        listDirectory(parent, function (entries) {
+            var list = entries.filter(function (e) { return !e.isDir; });
+            var cur = list.filter(function (e) { return e.file.fullPath === fullPath; })[0];
+            if (cur) { App.playlist = list; openVideo(cur, resumeMs); }
+            else     { openVideo(pseudo, resumeMs); }
+        });
     }, function (err) {
         UI.toast('Arquivo nao encontrado. O USB foi removido?');
     });
@@ -2497,9 +2684,14 @@ function onVideoEnded() {
     }
 }
 
-function playNextEpisode() {
+function playNextEpisode(fromCredits) {
     var next = findNextEpisode(App.playingPath);
-    if (next) { Player.stop(); openVideo(next, 0); }
+    if (next) {
+        var prev = App.playingPath;
+        Player.stop();
+        if (fromCredits === true) { ProgressStore.markComplete(prev); }   // viu ate os creditos
+        openVideo(next, 0);
+    }
     else { UI.toast('Este e o ultimo episodio da pasta.'); }
 }
 
@@ -2586,12 +2778,25 @@ function fmtSize(bytes) {
     while (bytes >= 1024 && i < u.length - 1) { bytes /= 1024; i++; }
     return bytes.toFixed(1) + ' ' + u[i];
 }
-function prettyName(name) {
-    return name.replace(/\.[^.]+$/, '').replace(/[._]/g, ' ').trim();
-}
 function baseName(p) { return p.split('/').pop(); }
 function dirName(p)  { return p.slice(0, p.lastIndexOf('/')); }
-function pad2(n)     { return (n < 10 ? '0' : '') + n; }
+
+/* Le um arquivo de texto do HD (UTF-8, sem BOM). Sempre pela funcao
+ * top-level tizen.filesystem.resolve(caminho completo) - File.resolve() de
+ * instancia trava nessa TV. onMissing recebe o erro (ausente/ilegivel). */
+function readTextFile(fullPath, onText, onMissing) {
+    function miss(e) { if (onMissing) { onMissing(e); } }
+    try {
+        tizen.filesystem.resolve(fullPath, function (f) {
+            f.openStream('r', function (s) {
+                var txt = '';
+                try { txt = s.read(s.bytesAvailable || 5000000); } catch (e) {}
+                try { s.close(); } catch (e) {}
+                onText(String(txt).replace(/^\uFEFF/, ''));
+            }, miss, 'UTF-8');
+        }, miss, 'r');
+    } catch (e) { miss(e); }
+}
 function escapeHtml(s) {
     return String(s).replace(/[&<>"']/g, function (c) {
         return { '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c];
@@ -2659,19 +2864,12 @@ var NetUpload = (function () {
     /* config opcional em AmorecoFlix/netupload.json (sobrescreve IP/porta) */
     function loadConfig(cb) {
         if (!App.libraryDir || !App.libraryDir.fullPath) { cb(CFG_DEFAULT); return; }
-        try {
-            tizen.filesystem.resolve(App.libraryDir.fullPath + '/netupload.json', function (f) {
-                f.openStream('r', function (s) {
-                    var text = '';
-                    try { text = s.read(s.bytesAvailable || 5000); } catch (e) {}
-                    s.close();
-                    try {
-                        var cfg = JSON.parse(text);
-                        cb({ pcIp: cfg.pcIp || CFG_DEFAULT.pcIp, port: cfg.port || CFG_DEFAULT.port });
-                    } catch (e) { cb(CFG_DEFAULT); }
-                }, function () { cb(CFG_DEFAULT); }, 'UTF-8');
-            }, function () { cb(CFG_DEFAULT); }, 'r');
-        } catch (e) { cb(CFG_DEFAULT); }
+        readTextFile(App.libraryDir.fullPath + '/netupload.json', function (text) {
+            try {
+                var cfg = JSON.parse(text);
+                cb({ pcIp: cfg.pcIp || CFG_DEFAULT.pcIp, port: cfg.port || CFG_DEFAULT.port });
+            } catch (e) { cb(CFG_DEFAULT); }
+        }, function () { cb(CFG_DEFAULT); });
     }
 
     function reply(obj) { try { if (ws) { ws.send(JSON.stringify(obj)); } } catch (e) {} }
@@ -2711,6 +2909,18 @@ var NetUpload = (function () {
        setInterval tiver parado de disparar por causa do player/AVPlay */
     function kickReconnect() {
         if (!connected) { ensureConnecting(); }
+    }
+
+    /* caminho/nome vindos do PC: nada de sair da biblioteca ("..", absoluto,
+       barra invertida) nem nome com separador */
+    function safeRel(p) {
+        p = String(p || '');
+        return p.charAt(0) !== '/' && p.indexOf('\\') === -1 &&
+               !/(^|\/)\.\.?(\/|$)/.test(p);
+    }
+    function safeName(n) {
+        n = String(n || '');
+        return !!n && n !== '.' && n !== '..' && !/[\/\\]/.test(n);
     }
 
     /* ---- resolucao de caminho (sempre pela funcao top-level, nunca
@@ -2758,6 +2968,7 @@ var NetUpload = (function () {
     }
 
     function handleList(msg) {
+        if (!safeRel(msg.path)) { reply({ type: 'listing-error', reqId: msg.reqId, message: 'caminho invalido' }); return; }
         resolveRel(msg.path || '', 'r', function (dir) {
             dir.listFiles(function (files) {
                 var entries = [];
@@ -2776,6 +2987,7 @@ var NetUpload = (function () {
     }
 
     function handleMkdir(msg) {
+        if (!safeRel(msg.path)) { reply({ type: 'mkdir-error', reqId: msg.reqId, message: 'caminho invalido' }); return; }
         mkdirp(msg.path || '', function () {
             reply({ type: 'mkdir-ok', reqId: msg.reqId });
         }, function (e) {
@@ -2792,6 +3004,10 @@ var NetUpload = (function () {
     function handleMeta(msg) {
         if (xferActive) {
             reply({ type: 'error', reqId: msg.reqId, message: 'Ja existe uma transferencia em andamento.' });
+            return;
+        }
+        if (msg.path !== '__NETTEST__' && (!safeRel(msg.path) || !safeName(msg.name))) {
+            reply({ type: 'error', reqId: msg.reqId, message: 'Caminho ou nome de arquivo invalido.' });
             return;
         }
         xferActive = true;

@@ -15,3 +15,9 @@ signature*.xml
 
 # chaves/segredos locais (TMDB etc.) - nunca commitar
 .env
+
+# gerado por calendario-lancamentos.ps1 (contem a chave da API)
+calendario-data.js
+
+# logs, CSVs e scripts avulsos de manutencao (os ja rastreados continuam no git)
+scratchpad/
