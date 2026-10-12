@@ -55,12 +55,15 @@ function To-Hash($obj) {
     if ($obj) { foreach ($p in $obj.PSObject.Properties) { $h[$p.Name] = $p.Value } }
     return $h
 }
-# propaganda de site de torrent fica de fora (mesma regra do isJunkVideo do app)
-$JunkVideo = '(^|[^a-z0-9À-ÿ])(promo|1xbet|comando\.to|comandotorrents?|torrentdosfilmes|bludv|lapumia|hipnos|douglasvip|thepiratefilmes|amostras?|samples?|trailer|propaganda)(?![a-z0-9À-ÿ])'
+# propaganda de site de torrent fica de fora (mesma regra do isJunkVideo do app).
+# Acentos so como \uXXXX: o PowerShell 5.1 le este arquivo (sem BOM) como ANSI,
+# e o intervalo de letras acentuadas escrito direto virava um intervalo invalido
+# (Is-Video recusava TODO video e os filmes sumiam do biblioteca.json).
+$JunkVideo = '(^|[^a-z0-9\u00c0-\u00ff])(promo|1xbet|comando\.to|comandotorrents?|torrentdosfilmes|bludv|lapumia|hipnos|douglasvip|thepiratefilmes|amostras?|samples?|trailer|propaganda)(?![a-z0-9\u00c0-\u00ff])'
 function Is-Junk($name) {
     $b = [IO.Path]::GetFileNameWithoutExtension($name)
     if ($b -notmatch $JunkVideo) { return $false }
-    return ($b -notmatch '[sS]\d{1,2}[\s._-]*[eE]\d{1,3}|\b\d{1,2}x\d{1,3}\b|episódio\s*\d|episodio\s*\d')
+    return ($b -notmatch '[sS]\d{1,2}[\s._-]*[eE]\d{1,3}|\b\d{1,2}x\d{1,3}\b|epis[o\u00f3]dio\s*\d')
 }
 function Is-Video($f) { ($VideoExt -contains $f.Extension.ToLower()) -and $f.Length -ge 8MB -and -not (Is-Junk $f.Name) }
 function Year-Of($date) { if ("$date" -match '^(\d{4})') { return [int]$matches[1] } return $null }

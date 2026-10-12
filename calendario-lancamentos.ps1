@@ -40,9 +40,9 @@ $ALIAS = @{
 
 function Norm($s) {
     $s = "$s".ToLower()
-    $s = $s -replace '(\d)\s*[ºª°]','$1' -replace '[ºª°]',''
-    $s = $s -replace '\b\d+\s*(a|ª)?\s*temporada\b','' -replace '\bseason\s*\d+\b',''
-    $s = $s -replace '[:\-–—_.,]',' ' -replace '[^\p{Ll}\p{Nd} ]',''
+    $s = $s -replace '(\d)\s*[\u00ba\u00aa\u00b0]','$1' -replace '[\u00ba\u00aa\u00b0]',''
+    $s = $s -replace '\b\d+\s*(a|\u00aa)?\s*temporada\b','' -replace '\bseason\s*\d+\b',''
+    $s = $s -replace '[:\-\u2013\u2014_.,]',' ' -replace '[^\p{Ll}\p{Nd} ]',''
     ($s -replace '\s+',' ').Trim()
 }
 
@@ -56,8 +56,8 @@ function WordOverlap($qn, $nm) {
 
 # acha o show na TMDB pelo nome da pasta (id + nome), sem baixar poster
 function Find-Show($folderName) {
-    $base = ($folderName -replace '\s*[-–]\s*\d+\s*(a|ª)?\s*Temporada\s*$','' `
-                         -replace '\s*\d+\s*(a|ª)?\s*Temporada\s*$','').Trim()
+    $base = ($folderName -replace '\s*[-\u2013]\s*\d+\s*(a|\u00aa)?\s*Temporada\s*$','' `
+                         -replace '\s*\d+\s*(a|\u00aa)?\s*Temporada\s*$','').Trim()
     $key  = Norm $base
     $queries = @()
     if ($ALIAS.ContainsKey($key)) { $queries += $ALIAS[$key] }

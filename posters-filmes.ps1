@@ -35,14 +35,14 @@ function Get-TitleYear($name) {
     $year = $null
     if ($n -match '\((19|20)\d{2}\)') { $year = [int]($matches[0] -replace '[()]','') }
     $t = $n -replace '\((19|20)\d{2}\).*$','' -replace '\[[^\]]*\].*$',''
-    $t = ($t -replace '\s*[-–:]\s*$','' -replace '\s{2,}',' ').Trim()
+    $t = ($t -replace '\s*[-\u2013:]\s*$','' -replace '\s{2,}',' ').Trim()
     return [pscustomobject]@{ Title = $t; Year = $year }
 }
 
 function Norm($s) {
     $s = "$s".ToLower()
-    $s = $s -replace '(\d)\s*[ºª°]','$1' -replace '[ºª°]',''   # 3º -> 3
-    $s = $s -replace '[:\-–—_.,]',' ' -replace '[^\p{Ll}\p{Nd} ]',''
+    $s = $s -replace '(\d)\s*[\u00ba\u00aa\u00b0]','$1' -replace '[\u00ba\u00aa\u00b0]',''   # 3º -> 3
+    $s = $s -replace '[:\-\u2013\u2014_.,]',' ' -replace '[^\p{Ll}\p{Nd} ]',''
     ($s -replace '\s+',' ').Trim()
 }
 
@@ -50,9 +50,9 @@ function Norm($s) {
 function Get-Queries($title) {
     $q = New-Object System.Collections.Generic.List[string]
     $q.Add($title)                                            # completo
-    $q.Add(($title -replace '\s+(\d+)\s*[-–:]\s*','$1 '))      # "Piratas 1 - Sub" -> "Piratas 1 Sub"
-    $q.Add(($title -replace '\s+\d+\s*[-–:]\s*',' '))          # "Piratas 1 - Sub" -> "Piratas Sub"
-    $q.Add(($title -replace '\s*[-–:].*$',''))                 # so a franquia
+    $q.Add(($title -replace '\s+(\d+)\s*[-\u2013:]\s*','$1 '))      # "Piratas 1 - Sub" -> "Piratas 1 Sub"
+    $q.Add(($title -replace '\s+\d+\s*[-\u2013:]\s*',' '))          # "Piratas 1 - Sub" -> "Piratas Sub"
+    $q.Add(($title -replace '\s*[-\u2013:].*$',''))                 # so a franquia
     $q | Where-Object { $_ -and $_.Trim().Length -ge 2 } | ForEach-Object { $_.Trim() } | Select-Object -Unique
 }
 

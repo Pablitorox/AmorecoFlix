@@ -29,7 +29,7 @@ if (-not $ffprobe) { Write-Error "ffprobe nao encontrado"; exit 1 }
 function Norm($s) { ("$s".ToLower() -replace '[^\p{Ll}\p{Nd} ]',' ' -replace '\s+',' ').Trim() }
 function Get-Ep($n) {
     if ($n -match '[sS]\d{1,2}[\s._\-]*[eE](\d{1,3})') { return [int]$matches[1] }
-    if ($n -match 'epis[oó]dio\s*(\d{1,3})') { return [int]$matches[1] }
+    if ($n -match 'epis[o\u00f3]dio\s*(\d{1,3})') { return [int]$matches[1] }
     if ($n -match '^\s*(\d{1,3})\b') { return [int]$matches[1] }
     return 0
 }

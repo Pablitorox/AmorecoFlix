@@ -32,7 +32,7 @@ Get-ChildItem -LiteralPath $Root -Recurse -Force -EA 0 | ForEach-Object {
     $f = $_
     if ($f.PSIsContainer) {
         # [eé] = "e" ou "e com acento" (ASCII no fonte: o PowerShell 5.1 le .ps1 sem BOM como ANSI)
-        if ($f.Name -match '^(cr[eé]ditos|amostra|sample|screens?|extras?)\b' -or $f.Name -match $JUNK_NAME) {
+        if ($f.Name -match '^(cr[e\u00e9]ditos|amostra|sample|screens?|extras?)\b' -or $f.Name -match $JUNK_NAME) {
             if (Has-RealVideo $f.FullName) {
                 Write-Host "  (mantida, tem video) $($f.FullName.Replace($Root, ''))" -ForegroundColor DarkGray
             } else {

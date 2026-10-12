@@ -29,7 +29,7 @@ $SUBDIRS = @('legendas','subs','subtitles','legenda')
 function EpOf($n) {
     if ($n -match '[sS]\d{1,2}[\s._\-]*[eE](\d{1,3})') { return [int]$matches[1] }
     if ($n -match '(\d{1,2})\s*x\s*(\d{1,3})') { return [int]$matches[2] }
-    if ($n -match 'epis[oó]dio\s*(\d{1,3})') { return [int]$matches[1] }
+    if ($n -match 'epis[o\u00f3]dio\s*(\d{1,3})') { return [int]$matches[1] }
     if ($n -match '^\s*(\d{1,3})\b') { return [int]$matches[1] }
     return 0
 }
