@@ -39,8 +39,28 @@ var Icons = (function () {
                (STROKE[name] || '') + '</svg>';
     }
 
-    return { svg: svg };
+    /* so os <path> (p/ um <svg> que ja existe na pagina) */
+    function paths(name) { return FILL[name] || STROKE[name] || ''; }
+
+    return { svg: svg, paths: paths };
 })();
+
+
+/* Rolagem de uma fileira por transform (mais leve que scroll na TV):
+ * centraliza o item focado sem passar das pontas. A fileira precisa de
+ * position:relative (offsetLeft dos itens) e o pai e a "janela" visivel. */
+function railScroller(rail) {
+    return function (item) {
+        var view = rail.parentNode.offsetWidth;
+        var max = Math.max(0, rail.scrollWidth - view);
+        var x = item.offsetLeft + item.offsetWidth / 2 - view / 2;
+        x = Math.max(0, Math.min(max, x));
+        rail.style.transform = 'translateX(' + (-x) + 'px)';
+    };
+}
+
+/* 7 -> "07" */
+function pad2(n) { return (n < 10 ? '0' : '') + n; }
 
 
 /* h('div', 'card', '<b>x</b>') -> elemento */

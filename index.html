@@ -64,74 +64,130 @@
 
         <!-- indicador central play/pause (fora da HUD p/ nao esmaecer junto) -->
         <div id="p-center" class="p-center" hidden>
-            <svg id="p-center-svg" viewBox="0 0 24 24" width="60" height="60" aria-hidden="true"></svg>
+            <svg id="p-center-svg" viewBox="0 0 24 24" width="60" height="60" fill="currentColor" aria-hidden="true"></svg>
         </div>
 
-        <div id="player-ui" class="player-ui">
-            <div class="p-top">
+        <!-- HUD: topo (voltar + titulo) e base (barra + botoes) -->
+        <div id="player-ui" class="player-ui mode-seek">
+            <div class="p-scrim-top" aria-hidden="true"></div>
+            <div class="p-scrim-bottom" aria-hidden="true"></div>
+
+            <header class="p-head">
+                <button id="p-back" class="p-back focusable" aria-label="Voltar"></button>
                 <div class="p-titlebox">
-                    <div class="p-crumb" id="now-sub"></div>
+                    <div id="now-sub" class="p-crumb"></div>
                     <h2 id="now-playing" class="p-title"></h2>
                 </div>
-                <button id="p-gear" class="p-gear focusable" aria-label="Audio e legendas"></button>
-            </div>
+            </header>
 
-            <div class="p-bottom">
-                <div class="p-scrub" id="p-scrub">
-                    <div class="p-scrub-track">
-                        <div class="p-scrub-buf" id="p-buf"></div>
-                        <div class="p-scrub-fill" id="progress-fill"></div>
-                    </div>
-                    <div class="p-scrub-knob" id="p-knob">
-                        <span class="p-scrub-preview" id="p-preview"></span>
-                    </div>
+            <section class="p-bottom" aria-label="Controles">
+                <div id="p-bubble" class="p-bubble" hidden>
+                    <span class="p-bubble-box"><b id="p-bubble-time">0:00</b><i id="p-bubble-delta"></i></span>
+                    <svg class="p-bubble-tip" width="22" height="12" viewBox="0 0 22 12" aria-hidden="true"><path d="M0 0h22L11 12z" fill="#FFFFFF"></path></svg>
                 </div>
-                <div class="p-times">
-                    <span id="time-current">0:00</span>
-                    <span id="time-total">0:00</span>
+                <div class="p-bar">
+                    <span id="time-current" class="p-time">0:00</span>
+                    <div id="p-scrub" class="p-scrub">
+                        <div class="p-track">
+                            <div id="p-buf" class="p-buf"></div>
+                            <div id="progress-fill" class="p-fill"></div>
+                            <div id="p-skipped" class="p-skipped"></div>
+                        </div>
+                        <div id="p-credits" class="p-credits" hidden><span>créditos</span></div>
+                        <div id="p-knob" class="p-knob"></div>
+                    </div>
+                    <span id="time-left" class="p-time p-time-left">0:00</span>
                 </div>
 
-                <div class="p-controls" data-nav-group="player">
-                    <button id="btn-rewind"   class="p-ic focusable" aria-label="Voltar 10 segundos"></button>
+                <div class="p-row" data-nav-group="player">
                     <button id="btn-playpause" class="p-ic p-ic-lg focusable" aria-label="Pausar"></button>
-                    <button id="btn-forward"  class="p-ic focusable" aria-label="Avancar 10 segundos"></button>
-                    <button id="btn-next"     class="p-ic focusable" aria-label="Proximo episodio"></button>
-                    <button id="btn-stop"     class="p-ic focusable" aria-label="Parar"></button>
+                    <button id="btn-rewind"    class="p-ic focusable" aria-label="Voltar 10 segundos"></button>
+                    <button id="btn-forward"   class="p-ic focusable" aria-label="Avançar 10 segundos"></button>
+                    <span class="p-row-gap"></span>
+                    <button id="btn-episodes"  class="p-pill focusable"></button>
+                    <button id="btn-tracks"    class="p-pill focusable"></button>
+                    <button id="btn-next"      class="p-pill focusable"></button>
+                </div>
+
+                <div class="p-scrub-hint">
+                    <span><b class="p-key">◀ ▶</b>segure para acelerar (10 s → 30 s → 1 min)</span>
+                    <span><b class="p-key">solte</b>vai para <em id="p-hint-time">0:00</em></span>
+                </div>
+            </section>
+        </div>
+
+        <!-- Pular abertura / encerramento -->
+        <button id="skip-btn" class="skip-btn" hidden>
+            <span class="skip-main"><span id="skip-ic"></span><span id="skip-label">Pular abertura</span><b class="skip-ok">OK</b></span>
+            <span class="skip-bar" aria-hidden="true"><i id="skip-fill"></i></span>
+        </button>
+        <span id="skip-hint" class="skip-hint" hidden>some sozinho quando a abertura acabar</span>
+
+        <!-- Proximo episodio (creditos / fim do video) -->
+        <section id="next-card" class="next-card" aria-label="Próximo episódio" hidden>
+            <div class="next-top">
+                <div class="next-art"><img id="next-img" class="art-img" alt=""><span id="next-num" class="next-num"></span></div>
+                <div class="next-info">
+                    <span class="next-kicker">PRÓXIMO EPISÓDIO</span>
+                    <span id="next-title" class="next-title"></span>
+                    <span id="next-sub" class="next-sub"></span>
                 </div>
             </div>
-        </div>
+            <button id="btn-next-play" class="next-play focusable">
+                <span id="next-ring" class="next-ring" hidden>
+                    <svg viewBox="0 0 40 40" aria-hidden="true">
+                        <circle class="next-ring-track" cx="20" cy="20" r="17"></circle>
+                        <circle id="next-ring-fill" class="next-ring-fill" cx="20" cy="20" r="17"></circle>
+                    </svg>
+                    <b id="next-secs"></b>
+                </span>
+                <span id="next-play-ic"></span>
+                Assistir agora
+            </button>
+            <span id="next-hint" class="next-hint"></span>
+        </section>
 
         <!-- Painel de audio e legendas -->
-        <div id="p-settings" class="p-settings" hidden>
-            <div class="p-settings-in" data-nav-group="settings">
-                <h3 class="p-settings-h">Audio</h3>
-                <div id="set-audio" class="p-set-list"></div>
-                <h3 class="p-settings-h">Legendas</h3>
-                <div id="set-text" class="p-set-list"></div>
+        <aside id="p-tracks" class="p-tracks" aria-label="Áudio e legendas" hidden>
+            <div id="p-tracks-in" class="p-tracks-in" data-nav-group="tracks">
+                <h3 class="p-tracks-h">Áudio</h3>
+                <div id="set-audio" class="p-tracks-list"></div>
+                <h3 class="p-tracks-h">Legendas</h3>
+                <div id="set-text" class="p-tracks-list"></div>
             </div>
-        </div>
+            <span class="p-tracks-note">A escolha vale para os próximos episódios desta série. RETURN fecha.</span>
+        </aside>
 
-        <!-- Botao pular abertura / encerramento -->
-        <button id="skip-btn" class="skip-btn" hidden></button>
+        <!-- Painel de episodios (sobe por cima do video pausado) -->
+        <section id="p-episodes" class="p-episodes" aria-label="Episódios" hidden>
+            <h3 class="p-episodes-h">Episódios <span id="p-episodes-season"></span></h3>
+            <div class="p-episodes-view">
+                <div id="p-episodes-rail" class="p-episodes-rail" data-nav-group="episodes"></div>
+            </div>
+            <span class="p-episodes-hint">OK assiste · RETURN volta ao episódio</span>
+        </section>
 
-        <!-- Aviso de fim de video / proximo episodio -->
-        <div id="next-toast" class="next-toast hidden">
-            <p id="next-toast-title">Reproduzindo a seguir</p>
-            <strong id="next-toast-name"></strong>
-            <div class="next-toast-actions" data-nav-group="toast">
-                <button id="btn-toast-play" class="pc-btn pc-btn-ring focusable">
-                    <span class="toast-ring">
-                        <svg viewBox="0 0 40 40" class="toast-ring-svg">
-                            <circle class="toast-ring-track" cx="20" cy="20" r="17"></circle>
-                            <circle id="toast-ring-fill" class="toast-ring-fill" cx="20" cy="20" r="17"></circle>
-                        </svg>
-                        <span id="next-toast-secs" class="toast-ring-num"></span>
-                    </span>
-                    <span class="toast-ring-label">Assistir agora</span>
+        <!-- Retomando (Continuar assistindo demorando) -->
+        <div id="p-resume" class="p-resume" hidden>
+            <div class="p-resume-box">
+                <span id="p-resume-ring" class="p-resume-ring">
+                    <svg width="132" height="132" viewBox="0 0 132 132" aria-hidden="true">
+                        <circle cx="66" cy="66" r="56" fill="none" stroke="rgba(255,255,255,0.14)" stroke-width="8"></circle>
+                        <circle class="p-resume-arc" cx="66" cy="66" r="56" fill="none" stroke="#E50914" stroke-width="8" stroke-linecap="round" stroke-dasharray="90 262"></circle>
+                    </svg>
+                </span>
+                <span id="p-resume-kicker" class="p-resume-kicker"></span>
+                <span id="p-resume-title" class="p-resume-title"></span>
+                <div class="p-resume-bar"><i id="p-resume-fill"></i><b id="p-resume-dot"></b></div>
+                <span id="p-resume-note" class="p-resume-note"></span>
+            </div>
+            <div class="p-resume-actions" data-nav-group="resume">
+                <button id="p-resume-start" class="p-pill focusable">
+                    <span id="p-resume-start-ic"></span><span id="p-resume-start-label">Começar do início</span>
                 </button>
-                <button id="btn-toast-cancel" class="pc-btn focusable">Cancelar</button>
+                <button id="p-resume-retry" class="p-pill focusable" hidden>Tentar de novo</button>
+                <span class="p-resume-exit"><b class="p-key">RETURN</b>sair</span>
             </div>
-            <span class="next-toast-hint">OK para assistir &nbsp;•&nbsp; &#9650; para ocultar</span>
         </div>
     </div>
 
@@ -159,5 +215,6 @@
     <script src="js/router.js"></script>
     <script src="js/components.js"></script>
     <script src="app.js"></script>
+    <script src="js/player-ui.js"></script>
 </body>
 </html>

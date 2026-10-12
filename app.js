@@ -305,6 +305,8 @@ var Player = (function () {
         resumeGuard   = 0;
         resumeAttempt = null;
         resumePlan    = null;
+        awaitingChoice = false;
+        gaveUpTarget  = 0;
         onEndedCb = onEnded || null;
         position  = 0;
         duration  = 0;
@@ -368,6 +370,16 @@ var Player = (function () {
     var resumeAttempt = null;   // tentativa em andamento (ver beginResume)
     var resumePlan    = null;   // [{ m, at }] + .step/.dir/.target (ver buildPlan)
     var loadGen       = 0;      // descarta callbacks de uma abertura anterior
+    var awaitingChoice = false; // retomada desistiu: esperando "comecar do inicio" / "tentar de novo"
+    var gaveUpTarget  = 0;
+
+    /* a tela "Retomando" (player-ui.js) acompanha a retomada por aqui:
+       { state: 'start'|'retry'|'ok'|'gaveup', step, total, target, dir } */
+    var resumeListener = null;
+    function emitResume(ev) {
+        if (!resumeListener) { return; }
+        try { resumeListener(ev); } catch (e) { console.error('[Player] tela de retomada:', e && e.message); }
+    }
 
     function avState() { try { return avplay.getState(); } catch (e) { return '?'; } }
     function methodName(m) { return m === 'ready' ? 'seek antes do play' : 'play antes do seek'; }
@@ -470,6 +482,8 @@ var Player = (function () {
         armResumeWatchdog();
         console.log('[Player] ' + (r.dir > 0 ? 'pulando trecho' : 'retomada') + ': tentativa ' + (plan.step + 1) + '/' +
                     plan.length + ' em ' + fmtTime(tryMs) + ' (' + methodName(r.m) + ')');
+        emitResume({ state: plan.step ? 'retry' : 'start', step: plan.step + 1, total: plan.length,
+                     target: plan.target, dir: plan.dir });
         if (r.m === 'ready') { issueResumeSeek(r); }   // play() so quando o seek terminar
         else { startPlay(r); }                          // seek quando o video estiver andando
     }
@@ -519,6 +533,7 @@ var Player = (function () {
         stallStep     = 0;
         lastPlayMs    = position;
         UI.showSpinner(false);
+        emitResume({ state: 'ok' });
     }
 
     /* a tentativa falhou: esse player fica num estado ruim (congelado, seek
@@ -534,22 +549,66 @@ var Player = (function () {
         if (plan && plan.step + 1 < plan.length && reopenCount < 6) {
             plan.step++;
             reopenCount++;
-            UI.toast(r.dir > 0 ? 'Pulando um trecho com problema do arquivo...' : 'Retomando de outro jeito...');
-            loadAvplay(currentUri);
+            if (!resumeListener) {
+                UI.toast(r.dir > 0 ? 'Pulando um trecho com problema do arquivo...' : 'Retomando de outro jeito...');
+            }
+            loadAvplay(currentUri);            // a tela "Retomando" mostra a nova tentativa
             return;
         }
         resumePlan = null;
         UI.showSpinner(false);
         if (r.dir > 0) {
             console.warn('[Player] nao consegui passar do trecho em', fmtTime(r.target));
-            UI.toast('Nao consegui passar desse trecho do arquivo (' + fmtTime(r.target) + '). O ponto ficou salvo.');
+            emitResume({ state: 'ok' });       // fecha a tela de recuperacao
+            UI.toast('Não consegui passar desse trecho do arquivo (' + fmtTime(r.target) + '). O ponto ficou salvo.');
             stopAndGoHome();
             return;
         }
-        console.warn('[Player] retomada desistiu; tocando do inicio (ponto salvo ' + fmtTime(r.target) + ' preservado)');
-        UI.toast('Nao consegui voltar ao ponto salvo (' + fmtTime(r.target) + '). Comecando do inicio - o ponto continua salvo.');
-        resumeMs = 0;
-        loadAvplay(currentUri);            // sem plano: abre e toca do inicio (isso sempre funcionou)
+        if (!resumeListener) {
+            console.warn('[Player] retomada desistiu; tocando do inicio (ponto salvo ' + fmtTime(r.target) + ' preservado)');
+            UI.toast('Não consegui voltar ao ponto salvo (' + fmtTime(r.target) + '). Começando do início - o ponto continua salvo.');
+            restart(true);
+            return;
+        }
+        // a tela pergunta: "Comecar do inicio" (sozinho em 5 s) ou "Tentar de novo".
+        // Ate la o player fica parado e nada e gravado.
+        console.warn('[Player] retomada desistiu em ' + fmtTime(r.target) + '; perguntando o que fazer');
+        awaitingChoice = true;
+        gaveUpTarget   = r.target;
+        stopTick();
+        try { avplay.stop(); } catch (e) {}
+        emitResume({ state: 'gaveup', target: r.target, dir: r.dir });
+    }
+
+    /* toca do inicio. keepPoint = a retomada falhou: o ponto salvo fica
+       protegido (resumeGuard) ate o video passar dele. Sem keepPoint o
+       usuario escolheu recomecar: o progresso passa a seguir o novo ponto. */
+    function restart(keepPoint) {
+        awaitingChoice = false;
+        clearResumeWatchdog();
+        resumeAttempt = null;
+        resumePlan    = null;
+        resumeMs      = 0;
+        reopenCount   = 0;
+        seekingUntil  = 0;
+        seekTarget    = 0;
+        if (!keepPoint) { resumeGuard = 0; }
+        console.log('[Player] comecando do inicio' + (keepPoint ? ' (ponto salvo preservado)' : ''));
+        emitResume({ state: 'ok' });
+        if (App.usingAvplay) { loadAvplay(currentUri); }
+        else { html5.currentTime = 0; html5.play(); }
+    }
+
+    /* "Tentar de novo" depois de desistir: plano novo, num player reaberto */
+    function retryResume() {
+        var target = gaveUpTarget || resumeMs;
+        awaitingChoice = false;
+        reopenCount = 0;
+        if (!validMs(target) || target < 1000) { restart(true); return; }
+        console.log('[Player] tentando a retomada de novo em', fmtTime(target));
+        resumeMs   = target;
+        resumePlan = buildPlan(target, -1);
+        loadAvplay(currentUri);
     }
 
     function loadAvplay(fileUri) {
@@ -574,7 +633,7 @@ var Player = (function () {
             onbufferingstart:    function ()   { if (!started) { UI.showSpinner(true); } },
             onbufferingprogress: function (p)  {
                 var pct = (position + (p / 100) * (duration - position)) / duration * 100;
-                UI.setBuffered(pct);
+                PlayerUI.setBuffered(pct);
                 checkResumeTimeout();
             },
             onbufferingcomplete: function ()   {
@@ -624,13 +683,13 @@ var Player = (function () {
                     UI.showSpinner(false);
                 }
                 if (resumeAttempt) {               // ainda retomando: barra mostra o alvo, nada de botoes
-                    UI.updateProgress(position, duration);
+                    PlayerUI.updateProgress(position, duration);
                     return;
                 }
                 position = ms;
-                UI.updateProgress(position, duration);
-                UI.updateSkip(position, duration);
-                UI.updateCredits(position, duration);
+                PlayerUI.updateProgress(position, duration);
+                PlayerUI.updateSkip(position, duration);
+                PlayerUI.updateCredits(position, duration);
                 autoSave();                        // nao depende so do tick
             }
         });
@@ -647,7 +706,7 @@ var Player = (function () {
             duration = avplay.getDuration();
             if (!validMs(duration)) { duration = 0; }   // ver validMs() acima
             readTracks();
-            UI.updateProgress(position, duration);
+            PlayerUI.updateProgress(position, duration);
             startTick();                               // antes do beginResume (zera seekingUntil)
             if (step && duration > 0 && step.at < duration - 2000) {
                 beginResume(step);                     // o play() fica a cargo do metodo
@@ -674,9 +733,9 @@ var Player = (function () {
         });
         html5.addEventListener('timeupdate', function () {
             position = Math.floor(html5.currentTime * 1000);
-            UI.updateProgress(position, duration);
-            UI.updateSkip(position, duration);
-            UI.updateCredits(position, duration);
+            PlayerUI.updateProgress(position, duration);
+            PlayerUI.updateSkip(position, duration);
+            PlayerUI.updateCredits(position, duration);
         });
         html5.addEventListener('ended', handleEnded);
         html5.addEventListener('waiting', function () { UI.showSpinner(true); });
@@ -684,7 +743,7 @@ var Player = (function () {
         html5.addEventListener('progress', function () {
             try {
                 if (html5.buffered.length && html5.duration) {
-                    UI.setBuffered(html5.buffered.end(html5.buffered.length - 1) / html5.duration * 100);
+                    PlayerUI.setBuffered(html5.buffered.end(html5.buffered.length - 1) / html5.duration * 100);
                 }
             } catch (e) {}
         });
@@ -714,7 +773,7 @@ var Player = (function () {
     function readTracks() {
         App.tracks = { audio: [], text: [] };
         App.trackSel = { audio: -1, text: -1 };
-        if (!App.usingAvplay) { readHtml5Tracks(); UI.buildSettings(); return; }
+        if (!App.usingAvplay) { readHtml5Tracks(); PlayerUI.buildTracks(); return; }
         try {
             var info = avplay.getTotalTrackInfo() || [];
             for (var i = 0; i < info.length; i++) {
@@ -739,7 +798,7 @@ var Player = (function () {
         } catch (e) { console.warn('[tracks] getTotalTrackInfo:', e && e.message); }
         console.log('[tracks] audio=' + App.tracks.audio.length + ' text=' + App.tracks.text.length);
         applyTrackPrefs();
-        UI.buildSettings();
+        PlayerUI.buildTracks();
     }
 
     function readHtml5Tracks() {
@@ -758,17 +817,35 @@ var Player = (function () {
         } catch (e) {}
     }
 
-    function selectAudio(index) {
+    /* Preferencia de faixa POR SERIE (decisao D8): "faixas:<Categoria/Serie>"
+     * guarda { audioLang, subLang } da serie; a global (ultima escolha em
+     * qualquer serie) vale para series ainda sem escolha. So escolha do
+     * usuario grava - a aplicada automaticamente (auto) nao. */
+    function prefKey() { var k = seriesKeyOf(App.playingPath); return k ? 'faixas:' + k : ''; }
+    function prefGet(name) {
+        var k = prefKey(), o = k ? PrefStore.get(k) : null;
+        return (o && o[name] != null) ? o[name] : PrefStore.get(name);
+    }
+    function prefSet(name, v) {
+        PrefStore.set(name, v);
+        var k = prefKey();
+        if (!k) { return; }
+        var o = PrefStore.get(k) || {};
+        o[name] = v;
+        PrefStore.set(k, o);
+    }
+
+    function selectAudio(index, auto) {
         App.trackSel.audio = index;
         if (App.usingAvplay) {
             try { avplay.setSelectTrack('AUDIO', index); } catch (e) { console.warn('[tracks] audio', e); }
         } else {
             try { for (var i = 0; i < html5.audioTracks.length; i++) { html5.audioTracks[i].enabled = (i === index); } } catch (e) {}
         }
-        PrefStore.set('audioLang', trackLang('audio', index));
+        if (!auto) { prefSet('audioLang', trackLang('audio', index)); }
     }
 
-    function selectText(index) {   // -1 = desligado ; <=-2 = legenda externa App.extSubs[-index-2]
+    function selectText(index, auto) {   // -1 = desligado ; <=-2 = legenda externa App.extSubs[-index-2]
         App.trackSel.text = index;
         var xs = index <= -2 ? (App.extSubs || [])[-index - 2] : null;
         if (App.usingAvplay) {
@@ -793,9 +870,10 @@ var Player = (function () {
                 }
             } catch (e) {}
         }
-        PrefStore.set('subLang', index === -1 ? '_off'
-                              : index <= -2  ? ('_file:' + ((xs && xs.lang) || ''))
-                              : trackLang('text', index));
+        if (auto) { return; }
+        prefSet('subLang', index === -1 ? '_off'
+                         : index <= -2  ? ('_file:' + ((xs && xs.lang) || ''))
+                         : trackLang('text', index));
     }
 
     /* fallback HTML5: injeta um <track> apontando pro .srt externo */
@@ -825,31 +903,33 @@ var Player = (function () {
 
     /* aplica a preferencia salva (idioma) ao trocar de episodio */
     function applyTrackPrefs() {
-        var aPref = PrefStore.get('audioLang'), sPref = PrefStore.get('subLang');
+        var aPref = prefGet('audioLang'), sPref = prefGet('subLang');
         if (aPref) {
             var a = App.tracks.audio.filter(function (t) { return langMatch(t.lang, aPref); })[0];
-            if (a && a.index !== App.trackSel.audio) { selectAudio(a.index); }
+            if (a && a.index !== App.trackSel.audio) { selectAudio(a.index, true); }
         }
         var xs = App.extSubs || [];
         var forced = App.tracks.text.filter(function (t) { return t.forced; })[0];
-        if (sPref === '_off') { selectText(-1); }
+        if (sPref === '_off') { selectText(-1, true); }
         else if (sPref && sPref.indexOf('_file') === 0 && xs.length) {
             var want = sPref.split(':')[1] || '';
             var pos = 0;
             for (var j = 0; j < xs.length; j++) { if (want && langMatch(xs[j].lang, want)) { pos = j; break; } }
-            selectText(-2 - pos);
+            selectText(-2 - pos, true);
         }
         else if (sPref) {
-            var s = App.tracks.text.filter(function (t) { return langMatch(t.lang, sPref); })[0];
+            // completa antes da forcada do mesmo idioma (as duas tem o mesmo codigo)
+            var same = App.tracks.text.filter(function (t) { return langMatch(t.lang, sPref); });
+            var s = same.filter(function (t) { return !t.forced; })[0] || same[0];
             // preferencia salva e de outro idioma que a legenda forcada nativa: a forcada ganha,
             // pois ela existe justamente p/ aparecer nesses trechos independente do idioma escolhido
-            if (forced && (!s || !langMatch(s.lang, forced.lang))) { selectText(forced.index); }
-            else if (s) { selectText(s.index); }
-            else if (xs.length) { selectText(-2); }
-            else { selectText(-1); }
-        } else if (forced) { selectText(forced.index); }
+            if (forced && (!s || !langMatch(s.lang, forced.lang))) { selectText(forced.index, true); }
+            else if (s) { selectText(s.index, true); }
+            else if (xs.length) { selectText(-2, true); }
+            else { selectText(-1, true); }
+        } else if (forced) { selectText(forced.index, true); }
         else if (App.tracks.text.length === 0 && xs.length) {
-            selectText(-2);
+            selectText(-2, true);
         }
     }
     function langMatch(a, b) {
@@ -912,10 +992,11 @@ var Player = (function () {
         clearResumeWatchdog();
         if (resumeAttempt) { console.log('[Player] parado durante a retomada (ponto salvo preservado)'); }
         resumeAttempt = null;
+        resumePlan    = null;
+        awaitingChoice = false;
         loadGen++;                             // ignora callbacks atrasados desta abertura
         UI.showSpinner(false);
-        UI.hideSkip();
-        UI.closeSettings();
+        PlayerUI.reset();
         document.body.classList.remove('playing');
         if (App.usingAvplay) {
             try { avplay.stop(); avplay.close(); } catch (e) {}
@@ -1021,6 +1102,7 @@ var Player = (function () {
     function saveProgress() {
         if (!App.playingPath || duration <= 0) { return; }
         if (resumeAttempt) { return; }         // retomada em andamento: posicao ainda nao e real
+        if (awaitingChoice) { return; }        // retomada desistiu, player parado esperando a escolha
         // player (re)aberto que ainda nao tocou nada: posicao nao e real (o
         // ponto salvo regredia gravando o alvo de uma tentativa no meio da troca)
         if (App.usingAvplay && !started) { return; }
@@ -1043,6 +1125,9 @@ var Player = (function () {
         stop: stop, saveProgress: saveProgress,
         poke: checkResumeTimeout,              // tecla do controle: reconfere o prazo da retomada
         selectAudio: selectAudio, selectText: selectText,
+        restart: restart, retryResume: retryResume,
+        setResumeListener: function (fn) { resumeListener = fn; },
+        isResuming:  function () { return !!(resumeAttempt || resumePlan || awaitingChoice); },
         getPosition: function () { return position; },
         getDuration: function () { return duration; },
         isPaused:    function () { return isPaused; }
@@ -1291,13 +1376,13 @@ var PrefStore = (function () {
 
 /* Nome legivel de um codigo de idioma */
 var LANG_NAMES = {
-    por: 'Portugues', pt: 'Portugues', pob: 'Portugues (BR)', 'pt-br': 'Portugues (BR)',
-    eng: 'Ingles', en: 'Ingles',
-    spa: 'Espanhol', es: 'Espanhol', jpn: 'Japones', ja: 'Japones',
-    fre: 'Frances', fra: 'Frances', fr: 'Frances', ger: 'Alemao', deu: 'Alemao', de: 'Alemao',
+    por: 'Português', pt: 'Português', pob: 'Português (Brasil)', 'pt-br': 'Português (Brasil)',
+    eng: 'Inglês', en: 'Inglês',
+    spa: 'Espanhol', es: 'Espanhol', jpn: 'Japonês', ja: 'Japonês',
+    fre: 'Francês', fra: 'Francês', fr: 'Francês', ger: 'Alemão', deu: 'Alemão', de: 'Alemão',
     ita: 'Italiano', it: 'Italiano', kor: 'Coreano', ko: 'Coreano',
-    chi: 'Chines', zho: 'Chines', zh: 'Chines', rus: 'Russo', ru: 'Russo',
-    mul: 'Multiplo', und: '', '': ''
+    chi: 'Chinês', zho: 'Chinês', zh: 'Chinês', rus: 'Russo', ru: 'Russo',
+    mul: 'Múltiplo', und: '', '': ''
 };
 function langName(code, fallback) {
     code = (code || '').toLowerCase().trim();
@@ -1742,32 +1827,7 @@ var UI = (function () {
         fileList:    document.getElementById('file-list'),
         homeScreen:  document.getElementById('home-screen'),
         playerScreen:document.getElementById('player-screen'),
-        playerUi:    document.getElementById('player-ui'),
-        nowPlaying:  document.getElementById('now-playing'),
-        progFill:    document.getElementById('progress-fill'),
-        tCur:        document.getElementById('time-current'),
-        tTot:        document.getElementById('time-total'),
-        btnPlay:     document.getElementById('btn-playpause'),
-        btnRewind:   document.getElementById('btn-rewind'),
-        btnForward:  document.getElementById('btn-forward'),
-        btnNext:     document.getElementById('btn-next'),
-        btnStop:     document.getElementById('btn-stop'),
-        nowSub:      document.getElementById('now-sub'),
-        scrub:       document.getElementById('p-scrub'),
-        knob:        document.getElementById('p-knob'),
-        buf:         document.getElementById('p-buf'),
-        preview:     document.getElementById('p-preview'),
-        pCenter:     document.getElementById('p-center'),
-        pCenterSvg:  document.getElementById('p-center-svg'),
-        pGear:       document.getElementById('p-gear'),
-        pSettings:   document.getElementById('p-settings'),
-        setAudio:    document.getElementById('set-audio'),
-        setText:     document.getElementById('set-text'),
-        spinner:     document.getElementById('spinner'),
-        nextToast:   document.getElementById('next-toast'),
-        nextToastNm: document.getElementById('next-toast-name'),
-        nextToastTitle: document.getElementById('next-toast-title'),
-        skipBtn:     document.getElementById('skip-btn')
+        spinner:     document.getElementById('spinner')
     };
 
     function setUsbStatus(text, cls) {
@@ -2068,307 +2128,13 @@ var UI = (function () {
         console.log('[thumbs] refresh aplicou', n, 'capas');
     }
 
-    /* --- Player: icones SVG --- */
-    var ICON = {
-        rewind:  '<path d="M12.5 8V4.5L7 10l5.5 5.5V12A6 6 0 1 1 6.5 18H4a8 8 0 1 0 8.5-10z"/>' +
-                 '<text x="12.7" y="14.6" font-size="6.5" font-weight="700" text-anchor="middle">10</text>',
-        forward: '<path d="M11.5 8V4.5L17 10l-5.5 5.5V12A6 6 0 1 0 17.5 18H20a8 8 0 1 1-8.5-10z"/>' +
-                 '<text x="11.3" y="14.6" font-size="6.5" font-weight="700" text-anchor="middle">10</text>',
-        play:    '<path d="M8 5v14l11-7z"/>',
-        pause:   '<path d="M6 5h4v14H6zM14 5h4v14h-4z"/>',
-        next:    '<path d="M6 5.5v13L15 12 6 5.5zM16.5 5.5v13H19v-13h-2.5z"/>',
-        stop:    '<path d="M7 7h10v10H7z"/>',
-        gear:    '<path d="M19.4 13c.04-.32.06-.66.06-1s-.02-.68-.07-1l2.1-1.6a.5.5 0 0 0 .12-.64l-2-3.46a.5.5 0 0 0-.6-.22l-2.49 1a7.3 7.3 0 0 0-1.7-.98l-.38-2.65A.49.49 0 0 0 13.5 1h-4a.49.49 0 0 0-.49.42l-.38 2.65c-.6.24-1.17.57-1.7.98l-2.49-1a.5.5 0 0 0-.6.22l-2 3.46a.5.5 0 0 0 .12.64L3.66 11c-.05.32-.07.66-.07 1s.02.68.07 1L1.56 14.6a.5.5 0 0 0-.12.64l2 3.46c.14.24.42.34.68.22l2.49-1c.53.4 1.1.74 1.7.98l.38 2.65c.04.24.25.42.49.42h4c.24 0 .45-.18.49-.42l.38-2.65c.6-.24 1.17-.57 1.7-.98l2.49 1c.26.12.54.02.68-.22l2-3.46a.5.5 0 0 0-.12-.64L19.4 13zM11.5 15.5A3.5 3.5 0 1 1 15 12a3.5 3.5 0 0 1-3.5 3.5z"/>'
-    };
-    function svg(paths, size) {
-        return '<svg viewBox="0 0 24 24" width="' + (size || 30) + '" height="' + (size || 30) +
-               '" fill="currentColor" aria-hidden="true">' + paths + '</svg>';
-    }
-    function initIcons() {
-        el.btnRewind.innerHTML  = svg(ICON.rewind);
-        el.btnForward.innerHTML = svg(ICON.forward);
-        el.btnNext.innerHTML    = svg(ICON.next);
-        el.btnStop.innerHTML    = svg(ICON.stop);
-        el.pGear.innerHTML      = svg(ICON.gear);
-        setPlayLabel(false);
-        // ao terminar o flash de "voltando", esconde; se estiver pausado (stay), mantem
-        el.pCenter.addEventListener('animationend', function () {
-            if (!el.pCenter.classList.contains('stay')) {
-                el.pCenter.hidden = true;
-                el.pCenter.classList.remove('flash');
-            }
-        });
-    }
-
-    /* --- Player --- */
-    function showPlayer(name) {
-        var ep = epLabel(name);
-        el.nowSub.textContent = ep ? (guessShow(name) ? guessShow(name) + '  ·  ' + ep : ep) : '';
-        el.nowPlaying.textContent = cleanName(name);
-        Screens.go('player');
-        hideNextToast();
-        el.pCenter.hidden = true;
-        el.pCenter.classList.remove('flash', 'stay');
-        fadeUi(false);
-    }
-    function guessShow(name) {
-        return seriesNameFromPath(App.playingPath);
-    }
     /* chamado ao voltar para a tela inicial (Screens 'home', enter com isBack) */
     function showHome() {
-        el.pCenter.hidden = true;
-        el.pCenter.classList.remove('flash', 'stay');
         renderContinue();
         renderFileList(App.dirFiles);
         Nav.focusFirst('files');
     }
-    function updateProgress(pos, dur) {
-        el.tTot.textContent = fmtTime(dur);
-        if (el.scrub.classList.contains('scrubbing')) { return; }   // previa manda
-        var pct = dur > 0 ? Math.max(0, Math.min(100, (pos / dur) * 100)) : 0;
-        el.progFill.style.width = pct + '%';
-        el.knob.style.left = pct + '%';
-        el.tCur.textContent = fmtTime(pos);
-    }
-    function setBuffered(pct) { if (el.buf) { el.buf.style.width = Math.max(0, Math.min(100, pct)) + '%'; } }
-
-    function setPlayLabel(paused) {
-        el.btnPlay.innerHTML = svg(paused ? ICON.play : ICON.pause, 40);
-        el.btnPlay.setAttribute('aria-label', paused ? 'Reproduzir' : 'Pausar');
-    }
-    function pulseCenter(paused) {
-        el.pCenter.classList.remove('flash', 'stay');
-        el.pCenterSvg.innerHTML = paused ? ICON.play : ICON.pause;
-        el.pCenter.hidden = false;
-        void el.pCenter.offsetWidth;          // reinicia a animacao
-        // pausado: icone de play fica na tela; voltando: flash rapido e some
-        el.pCenter.classList.add(paused ? 'stay' : 'flash');
-    }
-    function setSeekMode(on) { el.scrub.classList.toggle('seeking', !!on); }
-
-    function fadeUi(faded) { el.playerUi.classList.toggle('faded', faded); }
     function showSpinner(on) { el.spinner.classList.toggle('hidden', !on); }
-
-    /* --- Pular abertura / encerramento --- */
-    var skipTarget = 0, skipShown = false;
-
-    function updateSkip(posMs, durMs) {
-        if (!App.skip || durMs <= 0) { if (skipShown) { hideSkip(); } return; }
-        var sec = posMs / 1000, dur = durMs / 1000, seg = null, key = null;
-
-        var op = App.skip.op, ed = App.skip.ed;
-        if (op && !App.skipDone.op && sec >= Math.max(op[0], 1.5) && sec < op[1] - 0.5) {
-            seg = op; key = 'op';
-        } else if (ed && !App.skipDone.ed && sec >= ed[0] && sec < ed[1] - 0.5) {
-            seg = ed; key = 'ed';
-        }
-
-        if (seg) {
-            var target = Math.min(seg[1], dur - 3);     // nunca pula pros ultimos 3s
-            if (target <= sec + 1) { hideSkip(); return; }
-            if (!skipShown || skipTarget !== Math.round(target)) {
-                el.skipBtn.textContent = (key === 'op') ? 'Pular abertura' : 'Pular encerramento';
-                el.skipBtn.dataset.key = key;
-                skipTarget = Math.round(target);
-                el.skipBtn.hidden = false;
-                skipShown = true;
-                if (PlayerHud.mode && PlayerHud.mode() !== 'controls') { el.skipBtn.focus(); }
-            }
-        } else if (skipShown) {
-            hideSkip();
-        }
-    }
-
-    function hideSkip() {
-        if (!skipShown) { return; }
-        skipShown = false;
-        el.skipBtn.hidden = true;
-        if (document.activeElement === el.skipBtn && el.skipBtn.blur) { el.skipBtn.blur(); }
-    }
-
-    function doSkip() {
-        if (!skipShown) { return false; }
-        var k = el.skipBtn.dataset.key || 'op';
-        App.skipDone[k] = true;
-        Player.seekTo(skipTarget * 1000);
-        hideSkip();
-        PlayerHud.wake();
-        return true;
-    }
-
-    function skipVisible() { return skipShown; }
-
-    /* --- Card "Proximo episodio" ao comecar os creditos ---
-     * Momento: 1) fim do encerramento (ed) de anime, 2) cr[0] detectado por
-     * detectar-creditos.ps1, 3) padrao: 45 s antes do fim. Sem autoplay: o card
-     * espera OK (assistir) ou ▲ (ocultar); o autoplay de 5 s continua so no fim. */
-    var creditsShown = false, creditsDismissed = false;
-
-    function creditsStart(durSec) {
-        var s = App.skip, at = null;
-        if (s && s.ed && s.ed[1] > durSec - 240 && s.ed[1] < durSec - 5) { at = s.ed[1]; }
-        else if (s && s.cr && s.cr[0] > durSec * 0.5 && s.cr[0] < durSec - 5) { at = s.cr[0]; }
-        else { at = Math.max(durSec - 45, durSec * 0.9); }
-        return Math.min(at, durSec - 10);
-    }
-
-    function updateCredits(posMs, durMs) {
-        if (durMs <= 0 || !App.nextEp) { return; }
-        var sec = posMs / 1000, at = creditsStart(durMs / 1000);
-        if (sec < at - 3) {                                   // voltou antes dos creditos
-            creditsDismissed = false;
-            if (creditsShown) { hideNextToast(); }
-            return;
-        }
-        if (creditsShown || creditsDismissed || sec < at || sec >= durMs / 1000 - 0.5) { return; }
-        var next = App.nextEp;
-        creditsShown = true;
-        hideSkip();
-        showNextToast(next, function () { playNextEpisode(true); }, true);
-    }
-
-    function creditsVisible() { return creditsShown; }
-    function dismissCredits() { creditsDismissed = true; hideNextToast(); }
-    function resetCredits() { creditsShown = false; creditsDismissed = false; }
-
-    /* --- Painel de audio e legendas --- */
-    var settingsShown = false;
-
-    function optEl(label, on, onclick) {
-        var d = document.createElement('div');
-        d.className = 'p-set-opt focusable' + (on ? ' on' : '');
-        d.tabIndex = 0;
-        d.innerHTML = '<span class="p-check">&#10003;</span><span>' + escapeHtml(label) + '</span>';
-        d.addEventListener('click', onclick);
-        return d;
-    }
-    function trackText(t, i, word) {
-        var base = langName(t.lang, word + ' ' + (i + 1));
-        return t.label && t.label.toLowerCase() !== base.toLowerCase()
-             ? base + '  —  ' + t.label : base;
-    }
-    function buildSettings() {
-        var a = el.setAudio, s = el.setText;
-        if (!a || !s) { return; }
-        a.innerHTML = ''; s.innerHTML = '';
-
-        var audio = App.tracks.audio;
-        if (audio.length <= 1) {
-            a.appendChild(optEl(audio[0] ? langName(audio[0].lang, 'Original') : 'Original', true, function () {}));
-        } else {
-            audio.forEach(function (t, i) {
-                a.appendChild(optEl(trackText(t, i, 'Faixa'), t.index === App.trackSel.audio,
-                    function () { Player.selectAudio(t.index); buildSettings(); Nav.focusFirst('settings'); }));
-            });
-        }
-
-        s.appendChild(optEl('Desligado', App.trackSel.text === -1,
-            function () { Player.selectText(-1); buildSettings(); Nav.focusFirst('settings'); }));
-        App.tracks.text.forEach(function (t, i) {
-            s.appendChild(optEl(trackText(t, i, 'Legenda'), t.index === App.trackSel.text,
-                function () { Player.selectText(t.index); buildSettings(); Nav.focusFirst('settings'); }));
-        });
-        (App.extSubs || []).forEach(function (xs, i) {
-            var only = App.extSubs.length === 1;
-            var lbl  = xs.lang ? ('Arquivo · ' + langName(xs.lang, xs.lang))
-                     : only    ? 'Legenda do arquivo (.srt)' : ('Arquivo ' + (i + 1));
-            if (xs.forced) { lbl += ' — forçada'; }
-            s.appendChild(optEl(lbl, App.trackSel.text === (-2 - i),
-                (function (idx) {
-                    return function () { Player.selectText(idx); buildSettings(); Nav.focusFirst('settings'); };
-                })(-2 - i)));
-        });
-    }
-    function openSettings() {
-        buildSettings();
-        el.pSettings.hidden = false;
-        settingsShown = true;
-        Layers.open('settings');
-        UI.fadeUi(false);
-        Nav.setGroup('settings');
-        Nav.focusFirst('settings');
-    }
-    function closeSettings() {
-        el.pSettings.hidden = true;
-        settingsShown = false;
-        Layers.close('settings', true);
-        Nav.setGroup('player');
-        if (el.pGear.blur) { el.pGear.blur(); }
-        PlayerHud.wake();
-    }
-    function settingsOpen() { return settingsShown; }
-
-    /* previa de scrub (segurar ESQ/DIR) */
-    function showPreview(sec) {
-        if (sec == null) { el.scrub.classList.remove('scrubbing'); return; }
-        var dur = Player.getDuration() / 1000;
-        var pct = dur > 0 ? Math.max(0, Math.min(100, (sec / dur) * 100)) : 0;
-        el.knob.style.left = pct + '%';
-        el.progFill.style.width = pct + '%';
-        el.preview.textContent = fmtTime(sec * 1000);
-        el.scrub.classList.add('scrubbing');
-    }
-
-    var AUTOPLAY_SECS  = 5;
-    var RING_R         = 17;
-    var RING_C         = 2 * Math.PI * RING_R;
-    var nextToastInterval = null;
-    var btnToastPlay  = document.getElementById('btn-toast-play');
-    var ringFill      = document.getElementById('toast-ring-fill');
-    var ringNum       = document.getElementById('next-toast-secs');
-
-    function clearNextToastTimer() {
-        if (nextToastInterval) { clearInterval(nextToastInterval); nextToastInterval = null; }
-    }
-
-    function hideNextToast() {
-        clearNextToastTimer();
-        creditsShown = false;
-        el.nextToast.classList.add('hidden');
-        if (document.activeElement === btnToastPlay && btnToastPlay.blur) { btnToastPlay.blur(); }
-    }
-
-    function showNextToast(entry, onPlay, atCredits) {
-        var ep = epLabel(entry.name);
-        el.nextToast.classList.toggle('credits', !!atCredits);
-        if (!atCredits) { creditsShown = false; }
-        el.nextToastTitle.textContent = atCredits ? 'Proximo episodio' : 'Reproduzindo a seguir';
-        el.nextToastNm.textContent = cleanName(entry.name) + (ep ? '  •  ' + ep : '');
-        el.nextToast.classList.remove('hidden');
-        var btnPlay   = btnToastPlay;
-        var btnCancel = document.getElementById('btn-toast-cancel');
-        var secsLeft  = AUTOPLAY_SECS;
-
-        clearNextToastTimer();
-
-        if (atCredits) {                       // sem contagem: espera OK / ▲
-            btnPlay.onclick = function () { hideNextToast(); onPlay(); };            return;
-        }
-
-        // reseta o anel pro estado "cheio" sem animar, depois liga a transicao
-        ringFill.style.transition = 'none';
-        ringFill.style.strokeDashoffset = '0';
-        ringNum.textContent = secsLeft;
-        ringFill.getBoundingClientRect(); // forca reflow
-        ringFill.style.transition = 'stroke-dashoffset 1s linear';
-
-        btnPlay.onclick   = function () { hideNextToast(); onPlay(); };
-        btnCancel.onclick = function () { hideNextToast(); goHome(); };
-
-        nextToastInterval = setInterval(function () {
-            secsLeft--;
-            if (secsLeft <= 0) {
-                hideNextToast();
-                onPlay();
-            } else {
-                ringNum.textContent = secsLeft;
-                ringFill.style.strokeDashoffset =
-                    (RING_C * (AUTOPLAY_SECS - secsLeft) / AUTOPLAY_SECS) + '';
-            }
-        }, 1000);
-
-        Nav.focusFirst('toast');
-    }
 
     /* aviso curto: elemento proprio (#app-toast), fora das telas - nao mexe
        no card de proximo episodio nem no estado dele (creditsShown etc.) */
@@ -2385,17 +2151,9 @@ var UI = (function () {
         renderBreadcrumb: renderBreadcrumb, renderFileList: renderFileList,
         decorateCards: decorateCards, applyThumb: applyThumb,
         refreshThumbs: refreshThumbs,
-        cleanName: cleanName, epLabel: epLabel,
-        showPlayer: showPlayer, showHome: showHome, updateProgress: updateProgress,
-        setPlayLabel: setPlayLabel, fadeUi: fadeUi, showSpinner: showSpinner,
-        initIcons: initIcons, setSeekMode: setSeekMode, pulseCenter: pulseCenter,
-        setBuffered: setBuffered, showPreview: showPreview,
-        buildSettings: buildSettings, openSettings: openSettings,
-        closeSettings: closeSettings, settingsOpen: settingsOpen,
-        updateSkip: updateSkip, hideSkip: hideSkip, doSkip: doSkip, skipVisible: skipVisible,
-        updateCredits: updateCredits, creditsVisible: creditsVisible,
-        dismissCredits: dismissCredits, resetCredits: resetCredits,
-        showNextToast: showNextToast, hideNextToast: hideNextToast, toast: toast, el: el
+        cleanName: cleanName, epLabel: epLabel, epInfo: epInfo,
+        seriesNameFromPath: seriesNameFromPath,
+        showHome: showHome, showSpinner: showSpinner, toast: toast, el: el
     };
 })();
 
@@ -2407,15 +2165,7 @@ var UI = (function () {
 
 Nav.define('continue', { type: 'rail', down: 'files' });
 Nav.define('files',    { type: 'grid', up: 'continue' });
-Nav.define('settings', { type: 'col' });
-Nav.define('toast',    { type: 'row' });
 Nav.define('ctx',      { type: 'row' });
-Nav.define('player',   { type: 'row', items: function () {
-    var out = Array.prototype.slice.call(document.querySelectorAll('.p-controls .focusable'));
-    var gear = document.getElementById('p-gear');      // engrenagem no topo, por ultimo
-    if (gear) { out.push(gear); }
-    return out;
-} });
 
 
 /* ---------------------------------------------------------------------------
@@ -2439,65 +2189,6 @@ function registerRemoteKeys() {
     }
 }
 
-/* --- HUD do player: modo 'seek' (some em 4s) x modo 'controls' (botoes) --- */
-var PlayerHud = (function () {
-    var t = null, mode = 'seek';
-
-    function wake() {
-        UI.fadeUi(false);
-        if (t) { clearTimeout(t); t = null; }
-        if (mode === 'seek' && !Player.isPaused()) {
-            t = setTimeout(function () { UI.fadeUi(true); }, 4000);
-        }
-    }
-    function toControls() {
-        mode = 'controls';
-        if (t) { clearTimeout(t); t = null; }
-        UI.setSeekMode(false);
-        UI.fadeUi(false);
-        Nav.setGroup('player');
-        Nav.focusFirst('player');
-    }
-    function toSeek() {
-        mode = 'seek';
-        var a = document.activeElement;
-        if (a && a.blur) { a.blur(); }
-        UI.setSeekMode(true);
-        wake();
-    }
-    function reset() { mode = 'seek'; UI.setSeekMode(true); wake(); }
-    return {
-        wake: wake, toControls: toControls, toSeek: toSeek, reset: reset,
-        mode: function () { return mode; },
-        isFaded: function () { return UI.el.playerUi.classList.contains('faded'); }
-    };
-})();
-
-/* --- Segurar ESQ/DIR = varredura acelerada com previa (estilo streaming) --- */
-var Scrub = (function () {
-    var active = false, sec = 0, presses = 0, tAuto = null;
-    function step(dir) {
-        if (!active) { active = true; presses = 0; sec = Player.getPosition() / 1000; }
-        presses++;
-        var d = presses < 4 ? 10 : (presses < 9 ? 30 : 60);
-        var dur = Player.getDuration() / 1000;
-        sec = Math.max(0, Math.min(dur - 2, sec + dir * d));
-        UI.showPreview(sec);
-        PlayerHud.wake();
-        clearTimeout(tAuto);
-        tAuto = setTimeout(commit, 900);        // se o keyup nao vier
-    }
-    function commit() {
-        if (!active) { return; }
-        active = false;
-        clearTimeout(tAuto);
-        Player.seekTo(Math.round(sec * 1000));
-        UI.showPreview(null);
-        PlayerHud.wake();
-    }
-    return { step: step, commit: commit, isActive: function () { return active; } };
-})();
-
 /* Teclas: globais -> camada aberta do topo (Layers) -> tela atual (Screens) */
 function onKeyDown(ev) {
     var code = ev.keyCode;
@@ -2508,9 +2199,7 @@ function onKeyDown(ev) {
 }
 
 function onKeyUp(ev) {
-    if ((ev.keyCode === KEY.LEFT || ev.keyCode === KEY.RIGHT) && Scrub.isActive()) {
-        Scrub.commit(); return;
-    }
+    if (isPlayerActive()) { PlayerUI.keyUp(ev.keyCode); }       // fim do avanco acelerado
     if (ev.keyCode === KEY.ENTER) { Nav.okUp(); }     // toque curto num card com data-hold
 }
 
@@ -2530,74 +2219,11 @@ function homeKeys(code) {
     return true;
 }
 
-/* ---------------- PLAYER ---------------- */
-function playerKeys(code) {
-    Player.poke();                       // retomada presa sem eventos/timers: a tecla destrava
-    // parar/voltar funciona sempre
-    if (code === KEY.STOP || code === KEY.RETURN) { stopAndGoHome(); return true; }
-
-    var ctrl = (PlayerHud.mode() === 'controls');
-
-    // botao "Pular abertura" visivel: OK pula direto (mesmo com a HUD escondida),
-    // desde que o foco nao esteja nos controles da barra
-    if (UI.skipVisible() && !ctrl && code === KEY.ENTER) { UI.doSkip(); return true; }
-
-    // card "Proximo episodio" nos creditos: OK assiste, ▲ oculta
-    if (UI.creditsVisible() && !ctrl) {
-        if (code === KEY.ENTER) { playNextEpisode(true); return true; }
-        if (code === KEY.UP)    { UI.dismissCredits(); return true; }
-    }
-
-    // 1a tecla quando a HUD esta escondida: so revela (exceto play/pause)
-    if (PlayerHud.isFaded() && !UI.skipVisible() &&
-        code !== KEY.PLAY && code !== KEY.PAUSE && code !== KEY.PLAYPAUSE) {
-        PlayerHud.wake(); return true;
-    }
-    PlayerHud.wake();
-    switch (code) {
-        case KEY.YELLOW: UI.openSettings(); break;
-        case KEY.LEFT:  ctrl ? Nav.move('left')  : Scrub.step(-1); break;
-        case KEY.RIGHT: ctrl ? Nav.move('right') : Scrub.step(1);  break;
-        case KEY.DOWN:  if (!ctrl) { PlayerHud.toControls(); } break;
-        case KEY.UP:    if (ctrl)  { PlayerHud.toSeek(); }     break;
-        case KEY.ENTER: ctrl ? Nav.activate() : togglePlayFromRemote(); break;
-        case KEY.PLAY:
-        case KEY.PAUSE:
-        case KEY.PLAYPAUSE: togglePlayFromRemote(); break;
-        case KEY.FF:  Player.seekBy(85000);  break;
-        case KEY.REW: Player.seekBy(-85000); break;
-    }
-    return true;
-}
-
 Screens.register('home', {
     el: document.getElementById('home-screen'),
     enter: function (params, isBack) { if (isBack) { UI.showHome(); } },
     onKey: homeKeys
 });
-Screens.register('player', {
-    el: document.getElementById('player-screen'),
-    onKey: playerKeys
-});
-
-/* painel de audio e legendas (camada por cima do player) */
-Layers.register('settings', { onKey: function (code) {
-    switch (code) {
-        case KEY.UP:    Nav.move('up');   break;
-        case KEY.DOWN:  Nav.move('down'); break;
-        case KEY.ENTER: Nav.activate();   break;
-        case KEY.STOP:
-        case KEY.RETURN: UI.closeSettings(); break;
-    }
-} });
-
-function togglePlayFromRemote() {
-    var paused = Player.togglePlay();
-    UI.setPlayLabel(paused);
-    UI.pulseCenter(paused);
-    PlayerHud.wake();
-}
-
 
 /* ============================================================================
  * 7. FLUXO PRINCIPAL
@@ -2613,15 +2239,7 @@ function boot() {
     logCssSupport();
     Screens.go('home');
 
-    // liga botoes do player
-    document.getElementById('btn-playpause').onclick = togglePlayFromRemote;
-    document.getElementById('btn-rewind').onclick    = function () { Player.seekBy(-10000); };
-    document.getElementById('btn-forward').onclick   = function () { Player.seekBy(10000); };
-    document.getElementById('btn-stop').onclick      = stopAndGoHome;
-    document.getElementById('btn-next').onclick      = playNextEpisode;
-    document.getElementById('skip-btn').onclick      = function () { UI.doSkip(); };
-    document.getElementById('p-gear').onclick        = function () { UI.openSettings(); };
-    UI.initIcons();
+    PlayerUI.init();
 
     // ao focar um card de video sem miniatura, gera a dele com prioridade
     var focusTimer = null;
@@ -2770,16 +2388,10 @@ function openVideo(entry, resumeMs) {
             console.log('[Next] proxima temporada:', first.name);
         });
     }
-    UI.resetCredits();
     App.extSubs = findExtSubs(entry.name);         // legendas da pasta central /subs
-    UI.hideSkip();
-    UI.closeSettings();
-    UI.showPlayer(entry.name);
+    PlayerUI.show(entry);
     UI.showSpinner(true);
     Player.load(entry.file.toURI(), resumeMs, onVideoEnded);
-    UI.setPlayLabel(false);
-    Nav.setGroup('player');
-    PlayerHud.reset();
 }
 
 /* legendas externas do episodio: pasta central /subs (fallback: ao lado do video).
@@ -2855,7 +2467,7 @@ function savedPosition(entry) {
 function onVideoEnded() {
     var next = findNextEpisode(App.playingPath);
     if (next) {
-        UI.showNextToast(next, function () { openVideo(next, savedPosition(next)); });
+        PlayerUI.showNext(next, function () { Player.stop(); openVideo(next, savedPosition(next)); }, 'end');
     } else {
         stopAndGoHome();
     }
@@ -2873,12 +2485,12 @@ function playNextEpisode(fromCredits) {
 }
 
 function stopAndGoHome() {
-    UI.hideNextToast();
+    PlayerUI.hideNext();
     Player.stop(true);
     goHome();
 }
 function goHome() {
-    UI.hideNextToast();
+    PlayerUI.hideNext();
     Nav.setGroup('files');
     Screens.backTo('home');
     NetUpload.kickReconnect();
@@ -2986,6 +2598,15 @@ function readTextFile(fullPath, onText, onMissing) {
         }, miss, 'r');
     } catch (e) { miss(e); }
 }
+/* "Series/The Vampire Diaries" de um arquivo da biblioteca (categoria/titulo);
+ * '' para arquivo solto direto na categoria (filme) ou fora da biblioteca */
+function seriesKeyOf(fullPath) {
+    var base = App.libraryDir && App.libraryDir.fullPath, p = String(fullPath || '');
+    if (!base || p.indexOf(base + '/') !== 0) { return ''; }
+    var parts = p.slice(base.length + 1).split('/');
+    return parts.length >= 3 ? parts[0] + '/' + parts[1] : '';
+}
+
 /* URL de um arquivo do HD para <img> etc. (o simulador troca por http) */
 function fileUrl(fullPath) {
     return window.__fileUrl ? window.__fileUrl(fullPath) : 'file://' + fullPath;
