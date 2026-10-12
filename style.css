@@ -70,244 +70,254 @@ html, body {
    Entao deixamos tudo transparente enquanto o player esta ativo. */
 body.playing,
 body.playing #player-screen,
-body.playing #home-screen {
+body.playing .screen {
     background: transparent !important;
 }
 
 .hidden { display: none !important; }
 
-/* ---------- Estrutura de telas ---------- */
-.screen { display: none; width: 100%; height: 100%; }
-.screen.active { display: block; }
-
 /* ============================================================
-   TELA INICIAL  (estilo Netflix)
+   TELAS DE NAVEGACAO (telas 1-6 do prototipo)
    ============================================================ */
-#home-screen {
-    height: 100%;
-    overflow: hidden;
-    background:
-        radial-gradient(1200px 400px at 20% -5%, rgba(60,10,14,0.55), transparent 70%),
-        var(--bg);
-}
+.screen { display: none; position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; overflow: hidden; background: var(--bg); }
+.screen.active { display: block; }
+.focusable:focus { outline: none; }
+.art-img { position: absolute; left: 0; top: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0; transition: opacity 0.3s ease; }
+.art-img.loaded { opacity: 1; }
 
-.app-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 34px 60px 4px;
+/* ---------- barra do topo ---------- */
+.topbar {
+    position: absolute; left: 0; top: 0; width: 1920px; height: 120px; z-index: 30;
+    padding: 0 var(--gutter); box-sizing: border-box;
+    display: flex; align-items: center; gap: 64px;
 }
-.app-title {
-    font-size: 38px;
-    font-weight: 800;
-    letter-spacing: -0.5px;
-    color: var(--text);
+.logo { font-family: var(--font-title); font-weight: 700; font-size: 40px; letter-spacing: -0.02em; color: var(--text); }
+.logo span { color: var(--accent); }
+.tabs { display: flex; gap: 20px; }
+.tab {
+    border: none; background: none; font-family: inherit; font-size: 24px; font-weight: 500; color: var(--text-2);
+    padding: 8px 16px 10px; border-radius: 10px; cursor: pointer; border-bottom: 3px solid transparent;
 }
-.app-title-flix { color: var(--accent); }
-.usb-status { font-size: 17px; color: var(--text-dim); }
-.usb-status.ok    { color: #5fd08a; }
-.usb-status.error { color: var(--accent-soft); }
+.tab.on { color: #FFFFFF; border-bottom-color: var(--accent); border-radius: 10px 10px 0 0; }
+.tab:focus { background: #FFFFFF; color: #0E0E10; border-radius: 10px; border-bottom-color: transparent; box-shadow: var(--ring-soft); }
+.topbar.no-tabs .tabs { display: none; }
+.hd-status { margin-left: auto; display: flex; align-items: center; gap: 12px; font-size: 20px; color: var(--text-2); }
+.hd-status.ok svg { color: var(--ok); }
+.hd-status.error { color: #FF8A8A; }
 
-/* ---------- Trilhos ---------- */
-.rail { padding: 6px 0 2px; }
-.rail.hidden { display: none; }
+/* ---------- botoes ---------- */
+.btn {
+    display: flex; align-items: center; gap: 14px; height: 76px; padding: 0 36px;
+    border: none; border-radius: 12px; font-family: inherit; font-size: 26px; font-weight: 600;
+    cursor: pointer; transition: transform 0.12s ease, box-shadow 0.12s ease, background 0.12s ease;
+}
+.btn svg { flex: none; }
+.btn-primary { background: rgba(255,255,255,0.9); color: #0E0E10; }
+.btn-secondary { background: rgba(255,255,255,0.16); color: var(--text); }
+.btn-icon { width: 76px; padding: 0; justify-content: center; }
+.btn-icon.is-on { color: var(--ok); }
+.btn:focus { background: #FFFFFF; color: #0E0E10; box-shadow: var(--ring-soft); transform: scale(1.04); }
+.key, .key-chip {
+    display: inline-block; padding: 2px 12px; border-radius: 6px; border: 2px solid var(--text-3);
+    color: var(--text); font-weight: 600; font-size: 18px; line-height: 1.3;
+}
+.key-red   { background: #C8102E; border-color: #C8102E; color: #FFFFFF; }
+.key-blue  { background: #2B6CD8; border-color: #2B6CD8; color: #FFFFFF; }
+.key-green { background: #1E8E4E; border-color: #1E8E4E; color: #FFFFFF; }
 
-.rail-title {
-    font-size: 22px;
-    font-weight: 700;
-    color: var(--text-2);
-    margin: 8px 0 4px 60px;
-}
-.browser-topbar {
-    display: flex;
-    align-items: baseline;
-    gap: 18px;
-    margin: 10px 0 0 60px;
-}
-.browser-topbar .rail-title { margin: 0; }
+/* ---------- fundo 16:9 (Inicio e pagina do titulo) ---------- */
+.backdrop { position: absolute; left: 640px; top: 0; width: 1280px; height: 720px; background: var(--surface-2); overflow: hidden; }
+.backdrop-shade-l, .backdrop-shade-b { position: absolute; left: 0; width: 1920px; pointer-events: none; }
+.backdrop-shade-l { top: 0; height: 720px; background: linear-gradient(90deg, #0E0E10 0%, #0E0E10 34%, rgba(14,14,16,0.55) 55%, rgba(14,14,16,0) 78%); }
+.backdrop-shade-b { top: 500px; height: 222px; background: linear-gradient(180deg, rgba(14,14,16,0) 0%, #0E0E10 100%); }
+.backdrop-series { left: 720px; width: 1200px; height: 680px; }
+.series-shade-l { height: 680px; background: linear-gradient(90deg, #0E0E10 0%, #0E0E10 38%, rgba(14,14,16,0.5) 58%, rgba(14,14,16,0) 80%); }
+.series-shade-b { top: 460px; height: 222px; }
 
-.rail-track {
-    display: flex;
-    gap: 14px;
-    padding: 26px 60px;
-    overflow-x: auto;
-    overflow-y: visible;
-    scroll-behavior: smooth;
+.kicker { font-size: 20px; font-weight: 600; letter-spacing: 0.14em; color: var(--text-2); min-height: 24px; }
+.hero-title {
+    margin: 0; font-family: var(--font-title); font-weight: 700; font-size: 104px; line-height: 0.98; letter-spacing: -0.03em;
+    max-width: 1000px; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
 }
-.rail-track::-webkit-scrollbar { height: 0; }
+.hero-title.t-md { font-size: 80px; }
+.hero-title.t-sm { font-size: 64px; line-height: 1.04; }
+.hero-text {
+    margin: 0; max-width: 760px; font-size: 26px; line-height: 1.45; color: #D6D6D2;
+    overflow: hidden; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical;
+}
+.hero-prog { display: flex; align-items: center; gap: 20px; font-size: 22px; color: #D6D6D2; }
+.mini-bar { width: 280px; height: 6px; border-radius: 3px; background: rgba(255,255,255,0.22); overflow: hidden; }
+.mini-bar i { display: block; height: 6px; background: var(--accent); }
+.hero-actions { display: flex; gap: 20px; margin-top: 8px; }
 
-.breadcrumb { font-size: 17px; color: var(--text-dim); }
-.breadcrumb .crumb.current { color: var(--text-2); font-weight: 600; }
-.breadcrumb .sep { margin: 0 8px; opacity: 0.5; }
+/* ---------- Inicio ---------- */
+.home-scroll { position: absolute; left: 0; top: 0; width: 1920px; transition: transform 0.25s ease; }
+.hero { position: absolute; left: var(--gutter); top: 168px; width: 1000px; display: flex; flex-direction: column; gap: 20px; transition: opacity 0.25s ease; }
+#screen-home.scrolled .hero { opacity: 0.25; }
+#row-continue { position: absolute; left: var(--gutter); top: 712px; width: 1824px; }
+#row-nextup   { position: absolute; left: var(--gutter); top: 1060px; width: 1824px; }
+#row-continue[hidden] ~ #row-nextup { top: 712px; }
+.row-h { margin: 0 0 20px; font-family: var(--font-title); font-weight: 600; font-size: 30px; }
+.row-view { position: relative; overflow: hidden; margin: -16px -24px; padding: 16px 24px; }
+.row-rail { position: relative; display: flex; gap: 28px; transition: transform 0.22s ease; }
 
-/* ---------- Grade de arquivos ---------- */
-.browser { padding: 2px 0 0; }
-.file-list {
-    list-style: none;
-    display: grid;
-    grid-template-columns: repeat(6, 1fr);
-    align-items: start;
-    gap: 12px 16px;
-    max-height: 540px;
-    overflow-y: auto;
-    padding: 28px 60px 40px;
+/* ---------- card 16:9 ---------- */
+.c16 { flex: none; display: flex; flex-direction: column; gap: 14px; cursor: pointer; }
+.c16-art { position: relative; border-radius: var(--r-card); overflow: hidden; transition: transform 0.12s ease, box-shadow 0.12s ease; }
+.c16-lg { width: 400px; } .c16-lg .c16-art { width: 400px; height: 225px; }
+.c16-md { width: 360px; } .c16-md .c16-art { width: 360px; height: 203px; }
+.c16-fl { width: 100%; } .c16-fl .c16-art { width: 100%; height: 230px; }
+.art-contain .art-img { object-fit: contain; }
+.c16-big {
+    position: absolute; left: 16px; top: 12px; font-family: var(--font-title); font-weight: 700; font-size: 40px;
+    color: rgba(255,255,255,0.92); text-shadow: 0 2px 12px rgba(0,0,0,0.7);
 }
-.file-list::-webkit-scrollbar { width: 0; }
-.file-list .empty {
-    grid-column: 1 / -1;
-    text-align: center;
-    color: var(--text-dim);
-    padding: 50px 0;
-    font-size: 20px;
+.c16-badge {
+    position: absolute; top: 14px; right: 14px; padding: 4px 10px; border-radius: 6px;
+    background: rgba(0,0,0,0.6); font-size: 18px; font-weight: 600; font-variant-numeric: tabular-nums;
 }
+.c16-over {
+    position: absolute; left: 20px; right: 20px; bottom: 24px;
+    font-family: var(--font-title); font-weight: 700; font-size: 30px; line-height: 1.05;
+    text-shadow: 0 2px 14px rgba(0,0,0,0.85);
+    overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+}
+.c16-check {
+    position: absolute; top: 14px; right: 14px; width: 36px; height: 36px; border-radius: 18px;
+    display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.6); color: var(--ok);
+}
+.c16-badge ~ .c16-check { right: auto; left: 14px; top: auto; bottom: 18px; }
+.c16-bar { position: absolute; left: 0; right: 0; bottom: 0; height: 6px; background: rgba(255,255,255,0.22); }
+.c16-bar i { display: block; height: 6px; background: var(--accent); }
+.c16-title { font-size: 24px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.c16-sub { font-size: 22px; color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.c16-sub.is-red { color: #FF6B6B; }
+.c16:focus .c16-art { box-shadow: var(--ring); transform: scale(1.04); }
+.c16:focus .c16-sub, .c16:focus .c16-title { color: #FFFFFF; }
+.c16.has-hold:focus .c16-sub::after { content: ' · segure OK p/ opções'; }
+.c16.is-done .c16-art { opacity: 0.72; }
+.c16.is-done:focus .c16-art { opacity: 1; }
+.c16.is-done .c16-bar i { background: var(--text-3); }
+.c16.is-current .c16-art { box-shadow: 0 0 0 3px var(--accent); }
+.c16.is-current:focus .c16-art { box-shadow: var(--ring); }
 
-/* ---------- Card unificado ---------- */
-.card { position: relative; cursor: pointer; }
-.rail-track .card { flex: 0 0 322px; }
+/* ---------- pagina do titulo ---------- */
+.series-top {
+    position: absolute; left: 0; top: 0; width: 1920px; height: 110px; z-index: 5;
+    padding: 0 var(--gutter); box-sizing: border-box; display: flex; align-items: center; gap: 48px;
+}
+.series-back { display: flex; align-items: center; gap: 12px; font-size: 22px; color: var(--text-2); }
+.series-top .logo { font-size: 32px; }
+.series-scroll { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; }
+.series-info { position: absolute; left: var(--gutter); top: 150px; width: 1000px; display: flex; flex-direction: column; gap: 20px; }
+.series-info .hero-title { font-size: 112px; }
+.series-info .hero-title.t-md { font-size: 84px; }
+.series-info .hero-title.t-sm { font-size: 64px; }
+.series-info .hero-text { -webkit-line-clamp: 4; }
+.info-chips { display: flex; flex-wrap: wrap; gap: 12px; font-size: 18px; font-weight: 600; }
+.info-chips:empty { display: none; }
+.info-chip { padding: 6px 14px; border-radius: 6px; border: 2px solid rgba(255,255,255,0.3); }
+.series-eps { position: absolute; left: var(--gutter); top: 718px; width: 1824px; }
+.series-eps-head { display: flex; align-items: center; gap: 28px; margin-bottom: 22px; }
+.series-eps-head .row-h { margin: 0; }
+.season-btn {
+    display: flex; align-items: center; gap: 10px; padding: 8px 18px; border: none; border-radius: 8px;
+    background: rgba(255,255,255,0.1); color: var(--text); font-family: inherit; font-size: 22px; font-weight: 600; cursor: pointer;
+}
+.season-btn:focus { background: #FFFFFF; color: #0E0E10; box-shadow: var(--ring-soft); }
 
-.card .art {
-    position: relative;
-    width: 100%;
-    padding-top: 56.25%;                 /* 16:9 */
-    border-radius: 6px;
-    overflow: hidden;
-    background: linear-gradient(150deg, #2a3a4a, #161b22);
-    filter: brightness(0.82);
-    transition: transform 0.16s ease, box-shadow 0.16s ease, filter 0.16s ease;
+/* ---------- Biblioteca ---------- */
+.cat-scroll { position: absolute; left: 0; top: 120px; width: 1920px; transition: transform 0.25s ease; }
+#screen-catalog { }
+.cat-filters { margin: 30px var(--gutter) 0; display: flex; align-items: center; gap: 16px; height: 72px; }
+.cat-h { margin: 0 24px 0 0; font-family: var(--font-title); font-weight: 700; font-size: 56px; letter-spacing: -0.02em; }
+.chips { display: flex; align-items: center; gap: 16px; flex: 1; }
+.chip {
+    padding: 12px 26px; border: none; border-radius: 30px; background: rgba(255,255,255,0.1); color: var(--text);
+    font-family: inherit; font-size: 22px; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 10px;
 }
-.card.is-dir .art { background: linear-gradient(150deg, #31435a, #1b2431); }
-.card .art > * { position: absolute; top: 0; left: 0; right: 0; bottom: 0; }
+.chip.on { background: rgba(255,255,255,0.86); color: #0E0E10; }
+.chip:focus { background: #FFFFFF; color: #0E0E10; box-shadow: var(--ring-soft); transform: scale(1.04); }
+.chip-sort { margin-left: auto; background: none; color: var(--text-2); border-radius: 10px; }
+.chip-sort.on { background: rgba(255,255,255,0.16); color: #FFFFFF; }
+.chip-sep { width: 2px; height: 36px; margin: 0 8px; background: rgba(255,255,255,0.16); }
+.cat-grid {
+    position: relative; margin: 56px var(--gutter) 60px; width: 1728px;
+    display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); column-gap: 32px; row-gap: 40px;
+}
+.cat-empty { margin: 40px var(--gutter); font-size: 26px; color: var(--text-2); }
+.poster { display: flex; flex-direction: column; gap: 14px; cursor: pointer; min-width: 0; }
+.poster-art { position: relative; height: 393px; border-radius: var(--r-card); overflow: hidden; transition: transform 0.12s ease, box-shadow 0.12s ease; }
+.poster-new {
+    position: absolute; top: 14px; left: 14px; z-index: 2; padding: 4px 10px; border-radius: 6px;
+    background: var(--accent); font-size: 16px; font-weight: 700; letter-spacing: 0.06em;
+}
+.poster-over {
+    position: absolute; left: 18px; right: 18px; bottom: 26px; font-family: var(--font-title); font-weight: 700;
+    font-size: 30px; line-height: 1.05; text-shadow: 0 2px 14px rgba(0,0,0,0.8);
+}
+.art-img.loaded ~ .poster-over { display: none; }
+.poster-sub { font-size: 22px; color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.poster:focus .poster-art { box-shadow: var(--ring); transform: scale(1.04); }
+.poster:focus .poster-sub { color: #FFFFFF; margin-top: 6px; }
 
-.card .art-img {
-    width: 100%; height: 100%;
-    object-fit: cover;
-    opacity: 0;
-    transition: opacity 0.3s ease;
+/* ---------- Pastas ---------- */
+.breadcrumb {
+    position: absolute; left: var(--gutter); top: 150px; right: var(--gutter);
+    display: flex; align-items: center; gap: 18px; font-size: 26px; color: var(--text-3); white-space: nowrap; overflow: hidden;
 }
-.card .art-img.loaded { opacity: 1; }
-.card .art-glyph {
-    display: flex; align-items: center; justify-content: center;
-    font-size: 24px; font-weight: 700; letter-spacing: 1px;
-    color: rgba(255,255,255,0.8);
-    text-shadow: 0 2px 8px rgba(0,0,0,0.55);
+.breadcrumb .crumb.current { font-family: var(--font-title); font-weight: 700; font-size: 44px; color: var(--text); }
+.fl-scroll { position: absolute; left: 0; top: 236px; width: 1920px; height: 760px; overflow: hidden; }
+.fl-grid {
+    list-style: none; margin: 16px var(--gutter) 40px; padding: 0; width: 1728px; transition: transform 0.25s ease;
+    display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); column-gap: 32px; row-gap: 36px;
 }
-.card.is-dir .art-glyph { font-size: 44px; }
-.card .art-img.loaded ~ .art-glyph { display: none; }
-
-/* pasta com capa real: proporcao fixa 2:3 (padrao de poster) em vez do 16:9
-   forcado - sem precisar de fundo desfocado. Largura reduzida (metade da
-   coluna) pra nao dominar a grade ao lado dos cards 16:9. Proporcao FIXA
-   (nao "natural" da imagem) pra todo poster ficar do mesmo tamanho, mesmo
-   quando a capa baixada tem um formato levemente diferente. */
-.card .art.poster-thumb {
-    width: 50%;
-    margin: 0 auto;
-    padding-top: 75%;   /* 150% de 50% = proporcao 2:3 sobre a largura do card inteiro */
-    height: 0;
-    background: none;
+.fl-empty { grid-column: 1 / -1; font-size: 26px; color: var(--text-2); padding: 40px 0; }
+.fl-band {
+    position: absolute; left: 0; right: 0; bottom: 0; height: 64px; background: var(--accent);
+    display: flex; align-items: center; padding: 0 22px; font-family: var(--font-title); font-weight: 700;
+    font-size: 24px; letter-spacing: 0.06em;
 }
-.card .art.poster-thumb .art-img {
-    position: absolute;
-    top: 0; left: 0; right: 0; bottom: 0;
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-}
-
-.card .art-badge {
-    top: auto; left: auto; right: 7px; bottom: 7px;
-    background: rgba(0,0,0,0.8); color: #fff;
-    font-size: 13px; padding: 2px 7px; border-radius: 3px;
-}
-.card .art-check {
-    right: auto; bottom: auto; left: 7px; top: 7px;
-    width: 24px; height: 24px; border-radius: 50%;
-    background: var(--accent); color: #fff;
-    display: flex; align-items: center; justify-content: center; font-size: 14px;
-}
-.card .art-bar {
-    top: auto; height: 5px;
-    background: var(--progress-bg);
-}
-.card .art-bar i { display: block; height: 100%; background: var(--accent); }
-
-.card .card-title {
-    margin-top: 8px;
-    font-size: 16px; font-weight: 600; line-height: 1.25;
-    color: var(--text-dim);
-    max-height: 2.5em; overflow: hidden;
-    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
-}
-.card .card-sub {
-    font-size: 13px; color: #7a7a7a; margin-top: 2px; min-height: 1em;
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-}
-
-/* ---------- Foco ---------- */
-.card:focus, .card.focused, .card:hover { outline: none; }
-.card:focus .art, .card.focused .art, .card:hover .art {
-    filter: brightness(1);
-    transform: scale(1.07);
-    box-shadow: 0 0 0 3px var(--focus-ring), 0 18px 42px rgba(0,0,0,0.65);
-    z-index: 5;
-}
-.card:focus .card-title, .card.focused .card-title, .card:hover .card-title {
-    color: var(--text);
-}
-/* cards sao ".focusable" (pro Nav generico), mas nao devem herdar o fundo
-   vermelho solido do foco de botao/link - so o proprio .art (acima) mostra
-   o destaque. Sem isso, o fundo aparecia vazando ao redor do poster de
-   pastas (que agora e mais estreito que o card inteiro). */
-.card.focusable:focus, .card.focusable:hover, .card.focusable.focused {
-    background: none;
-    box-shadow: none;
-}
-
-.focusable:focus, .focusable:hover, .focusable.focused {
-    outline: none;
-    background: var(--accent);
-    color: #fff;
-    box-shadow: 0 0 0 4px var(--focus-ring);
-}
-
-/* ---------- Rodape de dicas ---------- */
+.fl-band ~ .c16-bar { display: none; }
+.c16.is-dir .c16-over { bottom: 22px; }
 .hint-bar {
-    position: absolute;
-    bottom: 0; left: 0; right: 0;
-    display: flex;
-    flex-wrap: wrap;
-    gap: 12px 30px;
-    padding: 16px 60px;
-    background: linear-gradient(to top, rgba(0,0,0,0.9), transparent);
-    font-size: 16px;
-    color: var(--text-dim);
+    position: absolute; left: 0; bottom: 0; width: 1920px; height: 84px; padding: 0 var(--gutter); box-sizing: border-box;
+    display: flex; align-items: center; gap: 40px; background: var(--bg); border-top: 1px solid rgba(255,255,255,0.08);
+    font-size: 20px; color: var(--text-2);
 }
-.hint-bar .hint { display: inline-flex; align-items: center; gap: 9px; }
+.hint { display: flex; align-items: center; gap: 10px; }
+.hint-dim { margin-left: auto; color: var(--text-3); }
 
-/* pilulas coloridas imitando os botoes do controle remoto, em vez do nome
-   da cor em texto puro - mais rapido de reconhecer de longe na TV. */
-.hint-bar .key {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    min-width: 30px;
-    height: 22px;
-    padding: 0 8px;
-    border-radius: 11px;
-    font-size: 12px;
-    font-weight: 700;
-    letter-spacing: 0.3px;
-    line-height: 1;
+/* ---------- Sem HD ---------- */
+.nohd { position: absolute; left: 460px; top: 220px; width: 1000px; display: flex; flex-direction: column; align-items: center; gap: 28px; text-align: center; }
+.nohd-ic { width: 168px; height: 168px; border-radius: 84px; background: var(--surface-2); display: flex; align-items: center; justify-content: center; color: var(--text-2); }
+.nohd-title { margin: 0; font-family: var(--font-title); font-weight: 700; font-size: 64px; letter-spacing: -0.02em; }
+.nohd-text { margin: 0; max-width: 860px; font-size: 28px; line-height: 1.45; color: #D6D6D2; }
+.nohd-hint { font-size: 20px; color: var(--text-3); }
+
+/* ---------- Opcoes (segurar OK) ---------- */
+.options { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; z-index: 88; background: rgba(8,8,10,0.82); }
+.options-box {
+    position: absolute; left: 610px; top: 150px; width: 700px; box-sizing: border-box; padding: 36px;
+    border-radius: 20px; background: var(--surface-2); border: 1px solid rgba(255,255,255,0.1);
+    display: flex; flex-direction: column; gap: 28px; animation: optIn 0.18s ease;
 }
-.hint-bar .key-ok,
-.hint-bar .key-return {
-    background: rgba(255,255,255,0.12);
-    color: var(--text-2);
-    border: 1px solid rgba(255,255,255,0.28);
+@keyframes optIn { from { opacity: 0; transform: scale(0.97); } }
+.options-head { display: flex; gap: 24px; align-items: center; }
+.options-art { position: relative; flex: 0 0 240px; height: 135px; border-radius: 10px; overflow: hidden; }
+.options-info { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.options-title { font-family: var(--font-title); font-weight: 700; font-size: 34px; line-height: 1.1; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.options-sub { font-size: 22px; color: var(--text-2); }
+.options-list { display: flex; flex-direction: column; gap: 10px; }
+.opt {
+    display: flex; align-items: center; gap: 18px; height: 72px; padding: 0 24px; border: none; border-radius: 12px;
+    background: none; color: var(--text); font-family: inherit; font-size: 24px; font-weight: 500; text-align: left; cursor: pointer;
 }
-.hint-bar .key-red   { background: var(--accent); color: #fff; }
-.hint-bar .key-green { background: #23a55a;        color: #fff; }
-.hint-bar .key-blue  { background: #3b82f6;        color: #fff; }
+.opt svg { flex: none; }
+.opt-noic { display: inline-block; width: 26px; }
+.opt-danger { color: #FF8A8A; }
+.opt:focus { background: #FFFFFF; color: #0E0E10; font-weight: 600; box-shadow: var(--ring-soft); }
+.options-hint { font-size: 20px; color: var(--text-3); text-align: center; }
 
 /* ============================================================
    PLAYER  (telas 7-12 do prototipo)
@@ -680,21 +690,6 @@ body.resuming #spinner { display: none !important; }
     text-align: center;
     z-index: 80;
 }
-
-/* ---------- Menu de contexto (Continuar assistindo) ---------- */
-.ctx-menu {
-    position: absolute;
-    top: 0; left: 0; right: 0; bottom: 0;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 28px;
-    background: rgba(0,0,0,0.72);
-    z-index: 60;
-}
-.ctx-title { font-size: 30px; font-weight: 700; max-width: 70%; text-align: center; }
-.ctx-actions { display: flex; gap: 20px; }
 
 /* ---------- Status/progresso de recebimento de arquivo (nao-modal) ---------- */
 .net-upload {

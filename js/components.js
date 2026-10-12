@@ -12,6 +12,9 @@ var Icons = (function () {
         episodes: '<path d="M4 6h16M4 12h16M4 18h10"/>',
         tracks:   '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M7 13h4M13 13h4M7 16h7"/>',
         check:    '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
+        close:    '<path d="M6 6l12 12M18 6L6 18"/>',
+        folder:   '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
+        sort:     '<path d="M7 4v16M7 20l-3-3M7 20l3-3M14 6h7M14 12h5M14 18h3"/>',
         info:     '<circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5h.01"/>',
         restart:  '<path d="M4 12a8 8 0 1 0 2.3-5.6"/><path d="M4 4v4h4"/>',
         hd:       '<rect x="3" y="6" width="18" height="12" rx="2"/><path d="M7 12h.01M11 12h6"/>',
@@ -59,8 +62,71 @@ function railScroller(rail) {
     };
 }
 
+/* Rolagem vertical por transform de uma grade dentro de uma "janela" de
+ * altura viewH: so rola o necessario para o item focado caber inteiro.
+ * f(item) rola; f.reset() volta ao topo. */
+function vScroller(scrollEl, viewH, margin) {
+    var y = 0;
+    margin = margin || 0;
+    function f(item) {
+        var sr = scrollEl.getBoundingClientRect(), ir = item.getBoundingClientRect();
+        var top = ir.top - sr.top, bottom = ir.bottom - sr.top;
+        if (top - margin < y) { y = Math.max(0, top - margin); }
+        else if (bottom + margin > y + viewH) { y = bottom + margin - viewH; }
+        scrollEl.style.transform = y ? 'translateY(' + (-y) + 'px)' : '';
+    }
+    f.reset = function () { y = 0; scrollEl.style.transform = ''; };
+    return f;
+}
+
 /* 7 -> "07" */
 function pad2(n) { return (n < 10 ? '0' : '') + n; }
+
+/* 754000 ms -> "13 min" / "1 h 32 min" */
+function fmtMinutes(ms) {
+    if (!ms || ms <= 0) { return ''; }
+    var m = Math.max(1, Math.round(ms / 60000));
+    return m < 60 ? m + ' min' : Math.floor(m / 60) + ' h' + (m % 60 ? ' ' + (m % 60) + ' min' : '');
+}
+
+/* Card 16:9 (Continuar, Proximos, Episodios, Pastas)
+ *   o.size   'lg' 400x225 | 'md' 360x203 | 'fl' 420x236 (pastas)
+ *   o.art    url da imagem; o.bg fundo de reserva; o.big numero/rotulo grande
+ *            no canto (ex.: "07"); o.over titulo escrito sobre a arte
+ *   o.badge  selo no canto direito ("T1 E7"); o.check ✓ de assistido
+ *   o.pct    barra de progresso (null = sem barra)
+ *   o.title  linha abaixo da arte; o.sub linha menor; o.subCls classe extra
+ *   o.onClick / o.onHold (segurar OK) / o.key (data-key p/ refocar) */
+function card16(o) {
+    var c = h('div', 'c16 c16-' + (o.size || 'lg') + ' focusable' + (o.cls ? ' ' + o.cls : ''));
+    c.tabIndex = 0;
+    if (o.key) { c.setAttribute('data-key', o.key); }
+    c.innerHTML =
+        '<div class="c16-art" style="background:' + (o.bg || toneOf(o.over || o.title)) + '">' +
+            '<img class="art-img" alt="">' +
+            (o.big ? '<span class="c16-big">' + escapeHtml(o.big) + '</span>' : '') +
+            (o.badge ? '<span class="c16-badge">' + escapeHtml(o.badge) + '</span>' : '') +
+            (o.over ? '<span class="c16-over">' + escapeHtml(o.over) + '</span>' : '') +
+            (o.check ? '<span class="c16-check">' + Icons.svg('check', 20, 3) + '</span>' : '') +
+            (o.pct != null ? '<div class="c16-bar"><i style="width:' + Math.max(0, Math.min(100, o.pct)) + '%"></i></div>' : '') +
+        '</div>' +
+        (o.title ? '<span class="c16-title">' + escapeHtml(o.title) + '</span>' : '') +
+        (o.sub != null ? '<span class="c16-sub' + (o.subCls ? ' ' + o.subCls : '') + '">' + escapeHtml(o.sub) + '</span>' : '');
+    Art.set(c.querySelector('img'), o.art);
+    if (o.onClick) { c.addEventListener('click', o.onClick); }
+    if (o.onHold)  { c.setAttribute('data-hold', ''); c._onHold = o.onHold; }
+    return c;
+}
+
+/* recoloca o foco no item de mesma data-key depois de redesenhar um grupo */
+function refocusKey(group, key) {
+    if (!key) { return false; }
+    var list = Nav.items(group);
+    for (var i = 0; i < list.length; i++) {
+        if (list[i].getAttribute('data-key') === key) { Nav.focusIndex(group, i); return true; }
+    }
+    return false;
+}
 
 
 /* h('div', 'card', '<b>x</b>') -> elemento */

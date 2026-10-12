@@ -51,18 +51,34 @@ var PlayerUI = (function () {
         return (h ? h + ':' + pad2(m) : m) + ':' + pad2(s);
     }
 
-    /* serie / temporada / episodio de um arquivo (pelo nome e pela pasta) */
+    /* serie / temporada / episodio de um arquivo: pela biblioteca (numeracao
+       e titulos do TMDB) e, sem ela, pelo nome do arquivo e da pasta */
     function infoOf(entry) {
-        var path = entry.file.fullPath, i = UI.epInfo(entry.name) || {};
+        var path = entry.file.fullPath, t = window.Library ? Library.ofPath(path) : null;
+        var le = t ? Library.episodes(t).filter(function (e) { return e.path === path; })[0] : null;
+        if (t && le) {
+            var series = t.kind === 'serie' || t.kind === 'anime';
+            return { t: t, le: le, show: t.kind === 'filme' ? '' : Library.displayName(t),
+                     season: series ? (le.s || 0) : 0, ep: series && le.e != null ? le.e : null };
+        }
+        var i = UI.epInfo(entry.name) || {};
         return {
             show:   UI.seriesNameFromPath(path),
             season: i.s || seasonNumber(baseName(dirName(path))) || 0,
             ep:     i.e != null ? i.e : null
         };
     }
+    /* nome do episodio/filme sem o numero (cards: o numero ja aparece grande) */
     function epTitle(entry, info) {
         info = info || infoOf(entry);
+        if (info.t && info.le) { return Library.epTitle(info.t, info.le); }
         return info.ep != null ? 'Episódio ' + info.ep : UI.cleanName(entry.name);
+    }
+    /* titulo grande do player: "E7 · Alcohol Poison" / "Episódio 7" / filme */
+    function headTitle(entry, info) {
+        var name = epTitle(entry, info);
+        if (info.ep == null) { return name; }
+        return /^Episódio \d+$/.test(name) ? name : 'E' + info.ep + ' · ' + name;
     }
     /* "Death Parade · T1 E7" */
     function shortLabel(info, entry) {
@@ -87,12 +103,12 @@ var PlayerUI = (function () {
         if (curInfo.ep != null) {
             el.crumb.textContent = (curInfo.show || UI.cleanName(entry.name)) +
                                    (curInfo.season ? ' · Temporada ' + curInfo.season : '');
-            el.title.textContent = epTitle(entry, curInfo);
         } else {
-            var y = /\b(19|20)\d{2}\b/.exec(entry.name);
-            el.crumb.textContent = curInfo.show || ('Filme' + (y ? ' · ' + y[0] : ''));
-            el.title.textContent = UI.cleanName(entry.name);
+            var m = curInfo.t ? Meta.title(curInfo.t.key) : null;
+            var y = (m && m.ano) || ((/\b(19|20)\d{2}\b/.exec(entry.name) || [])[0]);
+            el.crumb.textContent = curInfo.show || ('Filme' + (y ? ' · ' + y : ''));
         }
+        el.title.textContent = headTitle(entry, curInfo);
         reset();
         el.btnEps.hidden = !(App.playlist && App.playlist.length > 1);
         refreshNextBtn();
