@@ -4,16 +4,49 @@
    Resolucao base da TV: 1920 x 1080.
    ============================================================ */
 
+/* Fontes embutidas (variaveis: 1 arquivo cobre todos os pesos). Licenca OFL
+   em fonts/OFL-*.txt. Sora = titulos, Figtree = texto. */
+@font-face {
+    font-family: 'Sora';
+    src: url('fonts/sora.woff2') format('woff2');
+    font-weight: 100 800;
+    font-style: normal;
+}
+@font-face {
+    font-family: 'Figtree';
+    src: url('fonts/figtree.woff2') format('woff2');
+    font-weight: 300 900;
+    font-style: normal;
+}
+
+/* Tokens do novo design (prototipo, Out/2026). Os nomes antigos continuam
+   valendo para as telas que ainda nao foram refeitas. */
 :root {
-    --bg:            #141414;   /* preto Netflix */
+    --bg:            #0E0E10;
+    --surface:       #141418;   /* paineis, dialogos */
+    --surface-2:     #1A1A1F;   /* placeholders */
+    --text:          #F5F5F2;
+    --text-2:        #B4B4B8;   /* secundario */
+    --text-3:        #8E8E94;   /* dicas */
+    --accent:        #E50914;
+    --ok:            #5FD08A;
+    --focus:         #FFFFFF;
+    --ring:          0 0 0 5px #FFFFFF;
+    --ring-soft:     0 0 0 5px rgba(255,255,255,0.28);
+    --r-card:        12px;
+    --r-btn:         14px;
+    --r-dialog:      18px;
+    --gutter:        96px;      /* margem lateral das telas */
+    --top:           64px;      /* margem do topo */
+    --font-title:    'Sora', 'Figtree', 'Segoe UI', Arial, sans-serif;
+    --font-text:     'Figtree', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+
+    /* nomes antigos */
     --bg-panel:      #1c1c1c;
     --bg-row:        #2b2b2b;
-    --text:          #ffffff;
-    --text-2:        #d6d6d6;
-    --text-dim:      #8c8c8c;
-    --accent:        #e50914;
+    --text-dim:      var(--text-3);
     --accent-soft:   #ff5864;
-    --focus-ring:    #ffffff;
+    --focus-ring:    var(--focus);
     --progress-bg:   rgba(120,120,120,0.5);
 }
 
@@ -26,7 +59,7 @@ html, body {
     overflow: hidden;
     background: var(--bg);
     color: var(--text);
-    font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+    font-family: var(--font-text);
     -webkit-user-select: none;
     user-select: none;
     cursor: none;                 /* sem mouse na TV */

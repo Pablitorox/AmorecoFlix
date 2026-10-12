@@ -1944,6 +1944,8 @@ var UI = (function () {
                 extraClass: 'is-continue',
                 onActivate: function () { openVideoByPath(r.path, r.position); }
             });
+            card.setAttribute('data-hold', '');
+            card._onHold = function () { ContextMenu.open(r.path); };
             el.continueList.appendChild(card);
         });
     }
@@ -2103,8 +2105,7 @@ var UI = (function () {
         var ep = epLabel(name);
         el.nowSub.textContent = ep ? (guessShow(name) ? guessShow(name) + '  ·  ' + ep : ep) : '';
         el.nowPlaying.textContent = cleanName(name);
-        el.homeScreen.classList.remove('active');
-        el.playerScreen.classList.add('active');
+        Screens.go('player');
         hideNextToast();
         el.pCenter.hidden = true;
         el.pCenter.classList.remove('flash', 'stay');
@@ -2113,9 +2114,8 @@ var UI = (function () {
     function guessShow(name) {
         return seriesNameFromPath(App.playingPath);
     }
+    /* chamado ao voltar para a tela inicial (Screens 'home', enter com isBack) */
     function showHome() {
-        el.playerScreen.classList.remove('active');
-        el.homeScreen.classList.add('active');
         el.pCenter.hidden = true;
         el.pCenter.classList.remove('flash', 'stay');
         renderContinue();
@@ -2283,6 +2283,7 @@ var UI = (function () {
         buildSettings();
         el.pSettings.hidden = false;
         settingsShown = true;
+        Layers.open('settings');
         UI.fadeUi(false);
         Nav.setGroup('settings');
         Nav.focusFirst('settings');
@@ -2290,6 +2291,7 @@ var UI = (function () {
     function closeSettings() {
         el.pSettings.hidden = true;
         settingsShown = false;
+        Layers.close('settings', true);
         Nav.setGroup('player');
         if (el.pGear.blur) { el.pGear.blur(); }
         PlayerHud.wake();
@@ -2400,98 +2402,20 @@ var UI = (function () {
 
 /* ============================================================================
  * 6. NAVEGACAO POR CONTROLE REMOTO (D-pad)
+ *    Motor de foco em js/nav.js; aqui so os grupos desta tela.
  * ==========================================================================*/
 
-var Nav = (function () {
-
-    var group = 'files';         // grupo focavel ativo
-
-    function items(g) {
-        var conts = document.querySelectorAll('[data-nav-group="' + g + '"]');
-        var out = [];
-        Array.prototype.forEach.call(conts, function (c) {
-            out = out.concat(Array.prototype.slice.call(
-                c.querySelectorAll('.focusable, .card')));
-        });
-        if (g === 'player') {
-            var gear = document.getElementById('p-gear');   // engrenagem no topo
-            if (gear) { out.push(gear); }
-        }
-        return out;
-    }
-
-    function focusFirst(g) {
-        group = g;
-        var list = items(g);
-        if (list.length) { list[0].focus(); }
-    }
-
-    /* nro de colunas da grade de arquivos (cards que compartilham o mesmo topo) */
-    function gridCols(list) {
-        if (list.length < 2) { return 1; }
-        var top0 = list[0].offsetTop, c = 1;
-        for (var i = 1; i < list.length; i++) {
-            if (Math.abs(list[i].offsetTop - top0) < 4) { c++; } else { break; }
-        }
-        return c;
-    }
-
-    function move(dir) {
-        var list = items(group);
-        if (!list.length) { return; }
-        var cur = document.activeElement;
-        var idx = list.indexOf(cur);
-        if (idx === -1) { list[0].focus(); return; }
-
-        var next = -1;
-
-        if (group === 'files') {                 // ---- grade 2D ----
-            var cols = gridCols(list);
-            if (dir === 'left')  { next = (idx % cols === 0) ? idx : idx - 1; }
-            if (dir === 'right') { next = (idx % cols === cols - 1) ? idx : idx + 1; }
-            if (dir === 'down')  { next = idx + cols; }
-            if (dir === 'up') {
-                if (idx < cols && !UI.el.continueSec.classList.contains('hidden')) {
-                    return switchGroup('continue');
-                }
-                next = idx - cols;
-            }
-        } else if (group === 'continue') {        // ---- trilho horizontal ----
-            if (dir === 'left')  { next = idx - 1; }
-            if (dir === 'right') { next = idx + 1; }
-            if (dir === 'down')  { return switchGroup('files'); }
-        } else if (group === 'settings') {        // ---- lista vertical ----
-            if (dir === 'up')   { next = idx - 1; }
-            if (dir === 'down') { next = idx + 1; }
-        } else {                                  // player / toast
-            if (dir === 'left')  { next = idx - 1; }
-            if (dir === 'right') { next = idx + 1; }
-        }
-
-        if (next >= 0 && next < list.length) {
-            list[next].focus();
-            list[next].scrollIntoView({
-                block: 'nearest',
-                inline: (group === 'continue') ? 'center' : 'nearest'
-            });
-        }
-    }
-
-    function switchGroup(g) {
-        if (items(g).length) { focusFirst(g); }
-    }
-
-    function activate() {
-        var cur = document.activeElement;
-        if (cur && typeof cur.click === 'function') { cur.click(); }
-    }
-
-    function setGroup(g) { group = g; }
-    function getGroup()  { return group; }
-
-    return { focusFirst: focusFirst, move: move, activate: activate,
-             setGroup: setGroup, getGroup: getGroup };
-})();
+Nav.define('continue', { type: 'rail', down: 'files' });
+Nav.define('files',    { type: 'grid', up: 'continue' });
+Nav.define('settings', { type: 'col' });
+Nav.define('toast',    { type: 'row' });
+Nav.define('ctx',      { type: 'row' });
+Nav.define('player',   { type: 'row', items: function () {
+    var out = Array.prototype.slice.call(document.querySelectorAll('.p-controls .focusable'));
+    var gear = document.getElementById('p-gear');      // engrenagem no topo, por ultimo
+    if (gear) { out.push(gear); }
+    return out;
+} });
 
 
 /* ---------------------------------------------------------------------------
@@ -2513,18 +2437,6 @@ function registerRemoteKeys() {
             try { tizen.tvinputdevice.registerKey(k); } catch (e) {}
         });
     }
-}
-
-/* --- deteccao de "segurar OK" sobre um card de Continuar assistindo --- */
-var holdTimer = null, holdFired = false;
-
-function startHold(elem) {
-    holdFired = false;
-    holdTimer = setTimeout(function () {
-        holdTimer = null;
-        holdFired = true;
-        ContextMenu.open(elem.dataset.path);
-    }, 550);
 }
 
 /* --- HUD do player: modo 'seek' (some em 4s) x modo 'controls' (botoes) --- */
@@ -2586,116 +2498,98 @@ var Scrub = (function () {
     return { step: step, commit: commit, isActive: function () { return active; } };
 })();
 
+/* Teclas: globais -> camada aberta do topo (Layers) -> tela atual (Screens) */
 function onKeyDown(ev) {
     var code = ev.keyCode;
-    var onPlayer = UI.el.playerScreen.classList.contains('active');
-    var ctxOpen  = ContextMenu.isOpen();
-
     if (code === KEY.GREEN) { DebugLog.toggle(); return; }
-    if (code === KEY.BLUE && !onPlayer) { NetUpload.toggleStatus(); return; }
-
-    // ---------------- PAINEL DE AUDIO/LEGENDAS ----------------
-    if (onPlayer && UI.settingsOpen()) {
-        switch (code) {
-            case KEY.UP:    Nav.move('up');   break;
-            case KEY.DOWN:  Nav.move('down'); break;
-            case KEY.ENTER: Nav.activate();   break;
-            case KEY.STOP:
-            case KEY.RETURN: UI.closeSettings(); break;
-        }
-        return;
-    }
-
-    // ---------------- PLAYER ----------------
-    if (onPlayer) {
-        Player.poke();                       // retomada presa sem eventos/timers: a tecla destrava
-        // parar/voltar funciona sempre
-        if (code === KEY.STOP || code === KEY.RETURN) { stopAndGoHome(); return; }
-
-        var ctrl = (PlayerHud.mode() === 'controls');
-
-        // botao "Pular abertura" visivel: OK pula direto (mesmo com a HUD escondida),
-        // desde que o foco nao esteja nos controles da barra
-        if (UI.skipVisible() && !ctrl && code === KEY.ENTER) { UI.doSkip(); return; }
-
-        // card "Proximo episodio" nos creditos: OK assiste, ▲ oculta
-        if (UI.creditsVisible() && !ctrl) {
-            if (code === KEY.ENTER) { playNextEpisode(true); return; }
-            if (code === KEY.UP)    { UI.dismissCredits(); return; }
-        }
-
-        // 1a tecla quando a HUD esta escondida: so revela (exceto play/pause)
-        if (PlayerHud.isFaded() && !UI.skipVisible() &&
-            code !== KEY.PLAY && code !== KEY.PAUSE && code !== KEY.PLAYPAUSE) {
-            PlayerHud.wake(); return;
-        }
-        PlayerHud.wake();
-        switch (code) {
-            case KEY.YELLOW: UI.openSettings(); break;
-            case KEY.LEFT:  ctrl ? Nav.move('left')  : Scrub.step(-1); break;
-            case KEY.RIGHT: ctrl ? Nav.move('right') : Scrub.step(1);  break;
-            case KEY.DOWN:  if (!ctrl) { PlayerHud.toControls(); } break;
-            case KEY.UP:    if (ctrl)  { PlayerHud.toSeek(); }     break;
-            case KEY.ENTER: ctrl ? Nav.activate() : togglePlayFromRemote(); break;
-            case KEY.PLAY:
-            case KEY.PAUSE:
-            case KEY.PLAYPAUSE: togglePlayFromRemote(); break;
-            case KEY.FF:  Player.seekBy(85000);  break;
-            case KEY.REW: Player.seekBy(-85000); break;
-        }
-        return;
-    }
-
-    // ---------------- MENU DE CONTEXTO ----------------
-    if (ctxOpen) {
-        switch (code) {
-            case KEY.LEFT:  Nav.move('left');  break;
-            case KEY.RIGHT: Nav.move('right'); break;
-            case KEY.ENTER: Nav.activate();    break;
-            case KEY.STOP:
-            case KEY.RETURN: ContextMenu.close(); break;
-        }
-        return;
-    }
-
-    // ---------------- NAVEGACAO (home) ----------------
-    switch (code) {
-        case KEY.LEFT:  Nav.move('left');  break;
-        case KEY.RIGHT: Nav.move('right'); break;
-        case KEY.UP:    Nav.move('up');    break;
-        case KEY.DOWN:  Nav.move('down');  break;
-
-        case KEY.ENTER:
-            var cur = document.activeElement;
-            if (cur && cur.classList && cur.classList.contains('is-continue')) {
-                if (holdTimer === null && !holdFired) { startHold(cur); }
-            } else {
-                Nav.activate();
-            }
-            break;
-
-        case KEY.STOP:
-        case KEY.RETURN:
-            goUpDirectory();
-            break;
-
-        case KEY.RED:
-            scanUsb();
-            break;
-    }
+    if (code === KEY.ENTER && Nav.holding()) { return; }   // OK segurado: so o keyup conta
+    if (Layers.onKey(code, ev)) { return; }
+    Screens.onKey(code, ev);
 }
 
 function onKeyUp(ev) {
     if ((ev.keyCode === KEY.LEFT || ev.keyCode === KEY.RIGHT) && Scrub.isActive()) {
         Scrub.commit(); return;
     }
-    if (ev.keyCode !== KEY.ENTER) { return; }
-    if (holdTimer === null && !holdFired) { return; }
-    var wasLong = holdFired;
-    if (holdTimer) { clearTimeout(holdTimer); holdTimer = null; }
-    holdFired = false;
-    if (!wasLong) { Nav.activate(); }   // toque curto no card -> Assistir
+    if (ev.keyCode === KEY.ENTER) { Nav.okUp(); }     // toque curto num card com data-hold
 }
+
+/* ---------------- TELA INICIAL (Continuar assistindo + pastas) ---------------- */
+function homeKeys(code) {
+    switch (code) {
+        case KEY.LEFT:  Nav.move('left');  break;
+        case KEY.RIGHT: Nav.move('right'); break;
+        case KEY.UP:    Nav.move('up');    break;
+        case KEY.DOWN:  Nav.move('down');  break;
+        case KEY.ENTER: Nav.okDown();      break;   // segurar OK no Continuar = opcoes
+        case KEY.STOP:
+        case KEY.RETURN: goUpDirectory();  break;
+        case KEY.RED:   scanUsb();         break;
+        case KEY.BLUE:  NetUpload.toggleStatus(); break;
+    }
+    return true;
+}
+
+/* ---------------- PLAYER ---------------- */
+function playerKeys(code) {
+    Player.poke();                       // retomada presa sem eventos/timers: a tecla destrava
+    // parar/voltar funciona sempre
+    if (code === KEY.STOP || code === KEY.RETURN) { stopAndGoHome(); return true; }
+
+    var ctrl = (PlayerHud.mode() === 'controls');
+
+    // botao "Pular abertura" visivel: OK pula direto (mesmo com a HUD escondida),
+    // desde que o foco nao esteja nos controles da barra
+    if (UI.skipVisible() && !ctrl && code === KEY.ENTER) { UI.doSkip(); return true; }
+
+    // card "Proximo episodio" nos creditos: OK assiste, ▲ oculta
+    if (UI.creditsVisible() && !ctrl) {
+        if (code === KEY.ENTER) { playNextEpisode(true); return true; }
+        if (code === KEY.UP)    { UI.dismissCredits(); return true; }
+    }
+
+    // 1a tecla quando a HUD esta escondida: so revela (exceto play/pause)
+    if (PlayerHud.isFaded() && !UI.skipVisible() &&
+        code !== KEY.PLAY && code !== KEY.PAUSE && code !== KEY.PLAYPAUSE) {
+        PlayerHud.wake(); return true;
+    }
+    PlayerHud.wake();
+    switch (code) {
+        case KEY.YELLOW: UI.openSettings(); break;
+        case KEY.LEFT:  ctrl ? Nav.move('left')  : Scrub.step(-1); break;
+        case KEY.RIGHT: ctrl ? Nav.move('right') : Scrub.step(1);  break;
+        case KEY.DOWN:  if (!ctrl) { PlayerHud.toControls(); } break;
+        case KEY.UP:    if (ctrl)  { PlayerHud.toSeek(); }     break;
+        case KEY.ENTER: ctrl ? Nav.activate() : togglePlayFromRemote(); break;
+        case KEY.PLAY:
+        case KEY.PAUSE:
+        case KEY.PLAYPAUSE: togglePlayFromRemote(); break;
+        case KEY.FF:  Player.seekBy(85000);  break;
+        case KEY.REW: Player.seekBy(-85000); break;
+    }
+    return true;
+}
+
+Screens.register('home', {
+    el: document.getElementById('home-screen'),
+    enter: function (params, isBack) { if (isBack) { UI.showHome(); } },
+    onKey: homeKeys
+});
+Screens.register('player', {
+    el: document.getElementById('player-screen'),
+    onKey: playerKeys
+});
+
+/* painel de audio e legendas (camada por cima do player) */
+Layers.register('settings', { onKey: function (code) {
+    switch (code) {
+        case KEY.UP:    Nav.move('up');   break;
+        case KEY.DOWN:  Nav.move('down'); break;
+        case KEY.ENTER: Nav.activate();   break;
+        case KEY.STOP:
+        case KEY.RETURN: UI.closeSettings(); break;
+    }
+} });
 
 function togglePlayFromRemote() {
     var paused = Player.togglePlay();
@@ -2716,6 +2610,8 @@ function boot() {
     document.addEventListener('keyup', onKeyUp);
     console.log('[boot] AmorecoFlix iniciado. tizen=' + (!!window.tizen) +
                ' webapis=' + (!!window.webapis));
+    logCssSupport();
+    Screens.go('home');
 
     // liga botoes do player
     document.getElementById('btn-playpause').onclick = togglePlayFromRemote;
@@ -2984,7 +2880,7 @@ function stopAndGoHome() {
 function goHome() {
     UI.hideNextToast();
     Nav.setGroup('files');
-    UI.showHome();
+    Screens.backTo('home');
     NetUpload.kickReconnect();
 }
 
@@ -3007,6 +2903,7 @@ var ContextMenu = (function () {
         title.textContent = UI.cleanName(rec.name) + (ep ? '  •  ' + ep : '');
         box.hidden = false;
         open_ = true;
+        Layers.open('ctx');
 
         bPlay.onclick = function () {
             close();
@@ -3026,6 +2923,7 @@ var ContextMenu = (function () {
     function close() {
         box.hidden = true;
         open_ = false;
+        Layers.close('ctx', true);
         if (document.querySelector('[data-nav-group="continue"] .card')) {
             Nav.setGroup('continue');
             Nav.focusFirst('continue');
@@ -3036,6 +2934,16 @@ var ContextMenu = (function () {
     }
 
     function isOpen() { return open_; }
+
+    Layers.register('ctx', { onKey: function (code) {
+        switch (code) {
+            case KEY.LEFT:  Nav.move('left');  break;
+            case KEY.RIGHT: Nav.move('right'); break;
+            case KEY.ENTER: Nav.activate();    break;
+            case KEY.STOP:
+            case KEY.RETURN: close(); break;
+        }
+    } });
 
     return { open: open, close: close, isOpen: isOpen };
 })();
@@ -3078,6 +2986,29 @@ function readTextFile(fullPath, onText, onMissing) {
         }, miss, 'r');
     } catch (e) { miss(e); }
 }
+/* URL de um arquivo do HD para <img> etc. (o simulador troca por http) */
+function fileUrl(fullPath) {
+    return window.__fileUrl ? window.__fileUrl(fullPath) : 'file://' + fullPath;
+}
+
+/* recursos de CSS que o layout novo usa - o navegador da TV ja mostrou que
+ * nao tem 'inset'; o resultado vai pro log (tecla VERDE / amorecoflix.log) */
+function logCssSupport() {
+    if (!window.CSS || !CSS.supports) { console.log('[css] CSS.supports indisponivel'); return; }
+    var tests = {
+        gap: 'display:flex;gap:1px', inset: 'inset:0', aspect: 'aspect-ratio:1/1',
+        clamp: '-webkit-line-clamp:2', objectFit: 'object-fit:cover', fontVar: 'font-variant-numeric:tabular-nums'
+    };
+    var out = [];
+    for (var k in tests) {
+        if (!tests.hasOwnProperty(k)) { continue; }
+        var parts = tests[k].split(';'), ok = true;
+        parts.forEach(function (d) { var i = d.indexOf(':'); ok = ok && CSS.supports(d.slice(0, i), d.slice(i + 1)); });
+        out.push(k + '=' + (ok ? 'sim' : 'NAO'));
+    }
+    console.log('[css] ' + out.join(' ') + ' | ' + navigator.userAgent.replace(/^.*?\(/, '('));
+}
+
 function escapeHtml(s) {
     return String(s).replace(/[&<>"']/g, function (c) {
         return { '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c];
