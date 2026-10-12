@@ -8,9 +8,18 @@ Escrito em: 12/10/2026
 
 | Fase | Situação |
 |---|---|
-| 0 — Base | ✅ feita (`ad1cf22`), testada no simulador; falta conferir na TV a linha `[css]` do log |
-| 1 — Player | ✅ feita (`2d116ab`), testada no simulador; **falta testar na TV** |
-| 2 a 7 | a fazer |
+| 0 — Base | ✅ `ad1cf22` |
+| 1 — Player | ✅ `2d116ab` |
+| 2 — Dados | ✅ `5b7d850` — `metadados.ps1` já rodou: 49 títulos, 48 fundos, 32 pôsteres em `E:\AmorecoFlix\meta` |
+| 3 a 6 — Início, título, Biblioteca, Pastas | ✅ `a8add99` (feitas juntas: compartilham barra do topo, cards e camadas) |
+| 7 — Polimento | ✅ textos com acento, versão 2.0.0, README, memória liberada na Biblioteca |
+
+Tudo testado no simulador (HD real em modo só leitura). **Falta o teste único na TV**
+(roteiro em "Testes" abaixo + a linha `[css]` do log, tecla VERDE).
+
+Fora do escopo por enquanto: seletor de temporada dentro do painel de Episódios
+do player (ele mostra a temporada atual); refatorar os scripts antigos de capas
+para usar as funções TMDB do `lib.ps1`; modo `-ApiUrl` (pela rede) no `metadados.ps1`.
 
 ---
 

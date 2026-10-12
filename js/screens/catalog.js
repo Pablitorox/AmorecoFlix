@@ -173,7 +173,7 @@ var Catalog = (function () {
             if (isBack) { restore(); }
             else { scrollGrid.reset(); Topbar.focusTabs(); }
         },
-        leave: function () { remember(); },
+        leave: function () { remember(); Art.release(el.grid); },   // ~50 posteres: libera a memoria
         refresh: refresh,
         onKey: function (code) { return screenKeys(code, back); }
     });
