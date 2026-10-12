@@ -746,3 +746,4 @@ body.resuming #spinner { display: none !important; }
 @keyframes spin { to { transform: rotate(360deg); } }
 .season-arrow { font-size: 14px; opacity: 0; }
 .season-btn:focus .season-arrow { opacity: 0.55; }
+.topbar.solid { background: var(--bg); }

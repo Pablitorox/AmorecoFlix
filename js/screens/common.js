@@ -62,6 +62,7 @@ var Topbar = (function () {
     Screens.onShow(function (name) {
         bar.hidden = !WITH_BAR[name];
         bar.classList.toggle('no-tabs', name === 'nohd');
+        bar.classList.toggle('solid', name === 'catalog' || name === 'folders');   // grade rola por baixo
         tabs.forEach(function (t) { t.classList.toggle('on', t.getAttribute('data-screen') === name); });
     });
     tabs.forEach(function (t) {

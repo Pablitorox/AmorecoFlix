@@ -36,7 +36,8 @@ var Home = (function () {
     function stillOf(t, path) { return ThumbsFolder.get(baseName(path)) || (t ? Meta.backdrop(t.key) : null); }
 
     function continueItems() {
-        var list = UI.dedupeContinueBySeries(ProgressStore.continueList()).slice(0, 12);
+        var all = ProgressStore.continueList().filter(function (r) { return !isJunkVideo(baseName(r.path)); });
+        var list = UI.dedupeContinueBySeries(all).slice(0, 12);
         return list.map(function (r) {
             var t = Library.ofPath(r.path);
             return { rec: r, path: r.path, t: t, ep: epOfPath(t, r.path) };
