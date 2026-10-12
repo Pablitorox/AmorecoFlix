@@ -2004,6 +2004,12 @@ function registerRemoteKeys() {
 /* Teclas: globais -> camada aberta do topo (Layers) -> tela atual (Screens) */
 function onKeyDown(ev) {
     var code = ev.keyCode;
+    // o app trata OK e setas sozinho: sem isso o navegador da TV tambem "clica"
+    // no <button> focado com o Enter - cada OK virava 2 cliques (pausa e
+    // despausa na hora; -10/+10 pediam 2 seeks e o 2o era recusado)
+    if (code === KEY.ENTER || (code >= KEY.LEFT && code <= KEY.DOWN)) {
+        try { ev.preventDefault(); } catch (e) {}
+    }
     if (code === KEY.GREEN) { DebugLog.toggle(); return; }
     if (code === KEY.ENTER && Nav.holding()) { return; }   // OK segurado: so o keyup conta
     if (Layers.onKey(code, ev)) { return; }
@@ -2012,7 +2018,10 @@ function onKeyDown(ev) {
 
 function onKeyUp(ev) {
     if (isPlayerActive()) { PlayerUI.keyUp(ev.keyCode); }       // fim do avanco acelerado
-    if (ev.keyCode === KEY.ENTER) { Nav.okUp(); }     // toque curto num card com data-hold
+    if (ev.keyCode === KEY.ENTER) {
+        try { ev.preventDefault(); } catch (e) {}
+        Nav.okUp();                                   // toque curto num card com data-hold
+    }
 }
 
 
