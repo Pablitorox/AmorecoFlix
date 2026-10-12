@@ -49,18 +49,36 @@ Chaves (TMDB, Gemini/Anthropic) ficam no `.env` (fora do git e do `.wgt`).
 2. Resolve o primeiro, entra na pasta `AmorecoFlix` e lista pastas + videos
    (`mp4, mkv, avi, mov, ts, ...`), com ordenacao **natural** (`S01E02` antes de `S01E10`).
    `thumbs/`, `subs/` e `skip.json` sao (re)lidos a cada escaneamento (tecla VERMELHA).
-3. Ao abrir um video: `webapis.avplay.open() -> prepareAsync() -> play()`, e faz
-   `seekTo()` se houver progresso salvo (com nova tentativa um pouco antes do
-   ponto, se o seek falhar).
-4. A cada 3 s grava `{ path, position, duration, done }` no `localStorage`; no
-   HD (`AmorecoFlix/progresso.json` + copia `progresso.bak.json`) grava no
-   maximo a cada 30 s e sempre ao pausar, parar ou sair. O arquivo do HD e a
-   fonte de verdade (sobrevive a reinstalacoes); se ele estiver corrompido, o
-   app usa o `.bak`.
+3. Ao abrir um video: `webapis.avplay.open() -> prepareAsync() -> play()`.
+   **Retomada** (ponto salvo): nessa TV, pedir o `seekTo()` e chamar `play()`
+   sem esperar o seek terminar deixa o player em "PLAYING" **parado** no
+   quadro do ponto salvo (qualquer arquivo/ponto - visto no log em Out/2026);
+   dai em diante todo seek nesse player falha (`PLAYER_ERROR_SEEK_FAILED`) e
+   so reabrir resolve. Por isso cada tentativa usa um player recem-aberto e
+   um de dois metodos: **seek antes do play** (`play()` so no callback de
+   sucesso do seek / buffer pronto) ou **play antes do seek** (toca, espera
+   andar, ai pede o seek). Plano: metodo preferido -> o outro -> o outro 20 s
+   antes -> toca do inicio com aviso (ponto salvo preservado). O metodo que
+   funcionar fica memorizado (`resumeMethod` nas preferencias). So conta
+   como retomado quando o video ANDA depois de chegar no ponto. Enquanto isso
+   nada e gravado. O progresso tambem e salvo a cada evento de posicao (~3 s).
+   **Travou no meio do video** (12 s parado): reemite play; 22 s -> reabre no
+   ponto e, se nao andar, 15 s / 30 s adiante - nunca seek no player parado
+   e nunca do zero; 38 s -> volta pra tela inicial.
+4. A cada 3 s grava `{ path, position, duration, done, updated }` no
+   `localStorage`; no HD (`AmorecoFlix/progresso.json` + copia
+   `progresso.bak.json`) grava no maximo a cada 30 s e sempre ao pausar, parar
+   ou sair. A chave e o caminho **relativo a biblioteca**
+   (`Series/Show/.../ep.mkv`), entao nao importa com que nome a TV monta o HD.
+   Ao abrir, HD e `localStorage` sao mesclados por episodio (fica o mais
+   recente); `progresso.json` corrompido -> usa o `.bak`.
+   O console do app tambem e gravado em `AmorecoFlix/amorecoflix.log`
+   (ate 512 KB) - a TV de varejo nao deixa ler logs pelo `sdb`.
 5. Passou de 92% da duracao => marcado como `done` e sai de "Continuar assistindo".
 6. No fim do video, `findNextEpisode()` oferece o proximo arquivo da pasta; no
    ultimo episodio da temporada, o 1o da pasta da temporada seguinte
-   (`Show - 2ª Temporada`, `Temporada 2`, `Season 2`, `S02`).
+   (`Show - 2ª Temporada`, `Temporada 2`, `Season 2`, `S02`). O proximo
+   episodio abre no ponto salvo dele, se ja tinha sido comecado.
 7. **Card "Proximo episodio" nos creditos:** quando o episodio chega ao inicio
    dos creditos aparece o card (OK = assistir, ▲ = ocultar; sem contagem). O
    momento vem de, nesta ordem: fim do encerramento (`ed`) de anime, `cr[0]` do

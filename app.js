@@ -19,6 +19,7 @@
  * ==========================================================================*/
 var DebugLog = (function () {
     var lines = [], box = null, visible = false;
+    var unsaved = [], saving = false;          // linhas ainda nao gravadas no HD (ver persist)
 
     function fmt(a) {
         try { return (a && typeof a === 'object') ? JSON.stringify(a) : String(a); }
@@ -26,11 +27,14 @@ var DebugLog = (function () {
     }
     function push(tag, args) {
         var t = new Date().toTimeString().slice(0, 8);
-        lines.push(t + ' [' + tag + '] ' +
-            Array.prototype.map.call(args, fmt).join(' '));
+        var line = t + ' [' + tag + '] ' + Array.prototype.map.call(args, fmt).join(' ');
+        lines.push(line);
         if (lines.length > 300) { lines.shift(); }
+        unsaved.push(line);
+        if (unsaved.length > 2000) { unsaved.splice(0, unsaved.length - 2000); }
         if (visible) { render(); }
     }
+    unsaved.push('===== AmorecoFlix iniciado em ' + new Date().toLocaleString() + ' =====');
     ['log', 'info', 'warn', 'error'].forEach(function (k) {
         var orig = (console[k] || function () {});
         console[k] = function () { try { orig.apply(console, arguments); } catch (e) {}
@@ -51,7 +55,48 @@ var DebugLog = (function () {
         box.hidden = !visible;
         if (visible) { render(); }
     }
-    return { toggle: toggle, isOpen: function () { return visible; } };
+
+    /* Acrescenta as linhas novas em AmorecoFlix/amorecoflix.log no HD - a TV
+     * de varejo bloqueia dlog/Web Inspector, entao e assim que da pra ver no
+     * PC o que aconteceu (ex.: uma retomada que falhou). Chamado junto com a
+     * gravacao do progresso (ProgressStore.flush). Passou de 512 KB, recomeca.
+     * Extensao .log de proposito: o limpar-lixo.ps1 apaga .txt. Nada de
+     * console.log aqui dentro (geraria linhas novas sem fim). */
+    var LOG_FILE = 'amorecoflix.log', LOG_MAX = 512 * 1024;
+    function persist() {
+        if (saving || !unsaved.length || !window.tizen || !tizen.filesystem ||
+            !window.App || !App.libraryDir || !App.libraryDir.fullPath) { return; }
+        saving = true;
+        var chunk = unsaved.join('\n') + '\n';
+        unsaved = [];
+        var dirPath = App.libraryDir.fullPath, path = dirPath + '/' + LOG_FILE;
+        function done() { saving = false; }
+        function append(f) {
+            try {
+                f.openStream('a', function (s) {
+                    try { s.write(chunk); } catch (e) {}
+                    try { s.close(); } catch (e) {}
+                    done();
+                }, done, 'UTF-8');
+            } catch (e) { done(); }
+        }
+        function create(dir) { try { append(dir.createFile(LOG_FILE)); } catch (e) { done(); } }
+        try {
+            tizen.filesystem.resolve(path, function (f) {
+                if (f.fileSize > LOG_MAX) {
+                    tizen.filesystem.resolve(dirPath, function (dir) {
+                        try { dir.deleteFile(f.fullPath, function () { create(dir); }, done); } catch (e) { done(); }
+                    }, done, 'rw');
+                } else {
+                    append(f);
+                }
+            }, function () {
+                tizen.filesystem.resolve(dirPath, create, done, 'rw');
+            }, 'rw');
+        } catch (e) { done(); }
+    }
+
+    return { toggle: toggle, persist: persist, isOpen: function () { return visible; } };
 })();
 
 /* Extensoes de video reconhecidas na navegacao. */
@@ -60,6 +105,10 @@ var VIDEO_EXT = ['mp4', 'mkv', 'avi', 'mov', 'm4v', 'ts', 'webm', 'wmv', 'flv',
 
 /* Considera "assistido" quando passou de 92% da duracao. */
 var COMPLETE_RATIO = 0.92;
+
+/* Pasta-raiz da biblioteca dentro do HD. Nada fora dela e mostrado.
+ * (aqui no topo: o ProgressStore usa ao iniciar) */
+var LIBRARY_DIR = 'AmorecoFlix';
 
 /* Estado global simples da aplicacao. */
 var App = {
@@ -228,22 +277,8 @@ var Player = (function () {
     function validMs(ms) { return typeof ms === 'number' && ms > 0 && ms < 4294967000; }
     var reopenCount   = 0;        // quantas vezes reabrimos este arquivo
     var seekingUntil  = 0;        // Date.now ate quando um seek esta em andamento (nao e travamento)
-    var seekTarget    = 0;        // alvo do ultimo seek (ms) - p/ reemitir se travar
-
-    /* alguns arquivos tem um ponto que o AVPlay simplesmente recusa fazer
-     * seek (PLAYER_ERROR_SEEK_FAILED mesmo com um ms valido - provavelmente
-     * indice/keyframe quebrado nesse trecho do arquivo). Sem isso, cada
-     * reabertura (automatica OU manual, via Continuar assistindo) tenta
-     * retomar exatamente nesse mesmo ponto de novo e falha de novo. Lembra
-     * o ultimo alvo que falhou p/ pular o seek e comecar do zero da proxima. */
-    var lastFailedSeek = null;    // { uri, ms }
-    function rememberFailedSeek(uri, ms) {
-        if (uri && validMs(ms)) { lastFailedSeek = { uri: uri, ms: ms }; }
-    }
-    function seekKnownBad(uri, ms) {
-        return !!lastFailedSeek && lastFailedSeek.uri === uri &&
-               Math.abs(lastFailedSeek.ms - ms) < 5000;
-    }
+    var seekTarget    = 0;        // alvo do seek em andamento (ms); zerado quando o playtime chega nele
+    var lastPlayedMs  = 0;        // ultima posicao REAL reportada pelo AVPlay (position e otimista no seek)
 
     /* --- inicializacao --- */
 
@@ -267,12 +302,9 @@ var Player = (function () {
      */
     function load(fileUri, resumeFromMs, onEnded) {
         resumeMs  = resumeFromMs || 0;
-        resumeGuard   = (validMs(resumeMs) && resumeMs >= 1000) ? resumeMs : 0;
+        resumeGuard   = 0;
         resumeAttempt = null;
-        if (seekKnownBad(fileUri, resumeMs)) {
-            console.warn('[Player] pulando seek de retomada (ja falhou antes nesse ponto):', resumeMs);
-            resumeMs = 0;
-        }
+        resumePlan    = null;
         onEndedCb = onEnded || null;
         position  = 0;
         duration  = 0;
@@ -280,6 +312,12 @@ var Player = (function () {
         reopenCount = 0;
         stallSince  = 0;
         stallStep   = 0;
+        seekTarget  = 0;
+        seekingUntil = 0;
+        if (validMs(resumeMs) && resumeMs >= 1000) {
+            console.log('[Player] abrindo com retomada em', fmtTime(resumeMs));
+            resumePlan = buildPlan(resumeMs, -1);
+        }
 
         if (App.usingAvplay) {
             loadAvplay(fileUri);
@@ -289,88 +327,229 @@ var Player = (function () {
         }
     }
 
-    var pendingSeek = 0;      // seek de retomada, aplicado apos o 1o buffering
     var watchdog    = null;   // timeout de "loading travado"
-    var started     = false;  // ja recebeu o 1o frame/playtime?
+    var started     = false;  // ja recebeu o 1o frame/playtime NESTA abertura do player?
 
     function clearWatchdog() { if (watchdog) { clearTimeout(watchdog); watchdog = null; } }
 
-    var resumeSeekWatchdog = null;   // ver armResumeWatchdog()
+    var resumeSeekWatchdog = null;   // checagem periodica da retomada (ver checkResumeTimeout)
     function clearResumeWatchdog() {
         if (resumeSeekWatchdog) { clearTimeout(resumeSeekWatchdog); resumeSeekWatchdog = null; }
     }
 
     /* --- retomada ("Continuar assistindo") ---
-     * Seek longo num arquivo grande do USB demora (10-25 s perto do fim), entao:
-     *  - a confirmacao vem do callback do proprio seekTo (sucesso/erro), nao de
-     *    um chute por tempo; o timeout e so uma rede de seguranca (25 s);
-     *  - se o ponto exato falhar, tenta um pouco ANTES (-20 s, -90 s) em vez de
-     *    largar direto no inicio do episodio;
-     *  - so se tudo falhar recomeca do zero, e mesmo assim o ponto salvo NAO e
-     *    sobrescrito (resumeGuard) - da pra tentar de novo depois. */
-    var RESUME_BACKOFF = [0, 20000, 90000];
-    var RESUME_TIMEOUT = 25000;
+     * Visto na TV (log no HD, Out/2026): pedir o seek e chamar play() logo em
+     * seguida - sem esperar o seek terminar - deixa o AVPlay em "PLAYING"
+     * PARADO no quadro do ponto salvo, em qualquer arquivo e ponto (Death
+     * Parade E7, Lanternas S01E08; os dois decodificam sem erro no PC). Daqui
+     * pra frente todo seek nesse player falha (PLAYER_ERROR_SEEK_FAILED) e so
+     * reabrir resolve. Comecar do zero sempre funcionou.
+     *
+     * Entao cada tentativa usa um player recem-aberto e um de dois METODOS:
+     *   'ready'   : seek no estado READY e play() SO depois do callback de
+     *               sucesso do seek (ou do buffer pronto; 8 s sem nenhum dos
+     *               dois -> play assim mesmo);
+     *   'playing' : play() primeiro, espera o video ANDAR e ai pede o seek.
+     * Plano: metodo preferido no alvo -> o outro metodo no alvo -> o outro 20 s
+     * antes -> desiste e toca do inicio (ponto salvo preservado: resumeGuard).
+     * O metodo que funcionar vira o preferido (PrefStore 'resumeMethod').
+     * Confirmacao: o playtime chega perto do alvo E anda (+1 s). Chegou e nao
+     * andou em 8 s = congelado -> proxima tentativa. Prazos conferidos nos
+     * eventos do player, num setTimeout de 2 s, no tick e a cada tecla.
+     * Enquanto isso nada e gravado e os botoes "Pular abertura"/"Proximo
+     * episodio" nao aparecem. O mesmo plano, para FRENTE (dir +1), pula um
+     * trecho onde o video travou no meio (ver checkStall). */
+    var RESUME_TIMEOUT       = 40000;  // prazo total de uma tentativa
+    var RESUME_NEAR          = 12000;  // playtime ate 12 s antes do alvo (keyframe) = chegou
+    var RESUME_FROZEN        = 8000;   // chegou no alvo e nao andou por 8 s = congelado
+    var RESUME_PLAY_FALLBACK = 8000;   // metodo 'ready': sem callback/buffer em 8 s -> play mesmo assim
+    var RESUME_IGNORED_TOL   = 12000;  // video tocando longe do alvo por 12 s (de midia) = seek ignorado
     var resumeGuard   = 0;      // ponto salvo a proteger enquanto a retomada nao confirmou
-    var resumeAttempt = null;   // { target, attempt, ms } da tentativa em andamento
+    var resumeAttempt = null;   // tentativa em andamento (ver beginResume)
+    var resumePlan    = null;   // [{ m, at }] + .step/.dir/.target (ver buildPlan)
     var loadGen       = 0;      // descarta callbacks de uma abertura anterior
+
+    function avState() { try { return avplay.getState(); } catch (e) { return '?'; } }
+    function methodName(m) { return m === 'ready' ? 'seek antes do play' : 'play antes do seek'; }
+    function preferredMethod() { return PrefStore.get('resumeMethod') === 'playing' ? 'playing' : 'ready'; }
+
+    /* tentativas em ordem; cada uma num player recem-aberto */
+    function buildPlan(target, dir) {
+        var a = preferredMethod(), b = (a === 'ready') ? 'playing' : 'ready';
+        // retomada: o problema costuma ser o METODO -> troca o metodo no mesmo ponto.
+        // travou no meio (dir +1): o metodo ja e conhecido, o problema costuma ser
+        // o TRECHO -> mesmo ponto 1x (travada passageira) e depois para frente.
+        var plan = (dir > 0)
+            ? [{ m: a, at: target }, { m: a, at: target + 15000 }, { m: b, at: target + 30000 }]
+            : [{ m: a, at: target }, { m: b, at: target }, { m: b, at: Math.max(1000, target - 20000) }];
+        plan.dir = dir > 0 ? 1 : -1;
+        plan.target = target;
+        plan.step = 0;
+        return plan;
+    }
+
+    /* reabre o arquivo e vai para ms (dir -1 = retomada, +1 = pular trecho) */
+    function reopenAt(ms, dir, why) {
+        resumeMs   = ms;
+        resumePlan = buildPlan(ms, dir);
+        console.warn('[Player] ' + why + '; reabrindo em ' + fmtTime(ms));
+        loadAvplay(currentUri);
+    }
+
+    function nearResume(r, ms) { return ms >= r.ms - RESUME_NEAR && ms <= r.ms + 15000; }
 
     function armResumeWatchdog() {
         clearResumeWatchdog();
         resumeSeekWatchdog = setTimeout(function () {
             resumeSeekWatchdog = null;
-            if (resumeAttempt) {
-                console.warn('[Player] retomada sem confirmacao em ' + (RESUME_TIMEOUT / 1000) + 's:', resumeAttempt.ms);
-                resumeFail();
-            }
-        }, RESUME_TIMEOUT);
+            checkResumeTimeout();
+            if (resumeAttempt && !resumeSeekWatchdog) { armResumeWatchdog(); }
+        }, 2000);
     }
 
-    function resumeSeek(target, attempt) {
-        var tryMs = Math.max(1000, target - RESUME_BACKOFF[attempt]);
+    /* prazos da tentativa (relogio): chamado nos eventos do player, no
+     * watchdog acima, no tick e a cada tecla - o que vier primeiro */
+    function checkResumeTimeout() {
+        var r = resumeAttempt;
+        if (!r) { return; }
+        var now = Date.now();
+        if (r.m === 'ready' && !r.played && now - r.at > RESUME_PLAY_FALLBACK) {
+            console.warn('[Player] seek sem callback em ' + (RESUME_PLAY_FALLBACK / 1000) + ' s (estado ' + avState() + '); dando play assim mesmo');
+            startPlay(r);
+            return;
+        }
+        if (r.nearMs >= 0 && now - r.nearAt > RESUME_FROZEN) {
+            resumeFailed(r, 'chegou em ' + fmtTime(r.nearMs) + ' mas o video nao anda (estado ' + avState() + ')');
+        } else if (now - r.at > RESUME_TIMEOUT) {
+            resumeFailed(r, 'sem confirmacao em ' + (RESUME_TIMEOUT / 1000) + ' s (estado ' + avState() + ')');
+        }
+    }
+
+    function startPlay(r, why) {
+        if (r.played) { return; }
+        r.played   = true;
+        r.playedAt = Date.now();
+        if (why) { console.log('[Player] play (' + why + ')'); }
+        try { avplay.play(); } catch (e) { console.error('[AVPlay] play()', e && e.message); }
+    }
+
+    function issueResumeSeek(r) {
         var gen = loadGen;
-        resumeAttempt = { target: target, attempt: attempt, ms: tryMs };
-        pendingSeek  = tryMs;
+        r.seekIssued = true;
+        try {
+            avplay.seekTo(r.ms, function () {
+                if (gen !== loadGen || resumeAttempt !== r) { return; }
+                if (r.m === 'ready') { startPlay(r, 'seek concluido'); }
+            }, function (err) {
+                if (gen !== loadGen || resumeAttempt !== r) { return; }
+                resumeFailed(r, 'seek recusado em ' + fmtTime(r.ms) + ' (' + (err && err.message) + ')');
+            });
+        } catch (e) {
+            if (resumeAttempt === r) { resumeFailed(r, 'seekTo falhou: ' + (e && e.message)); }
+        }
+    }
+
+    /* comeca a tentativa atual do plano (player recem-preparado, estado READY) */
+    function beginResume(step) {
+        var plan = resumePlan;
+        var tryMs = step.at;
+        if (duration > 0) { tryMs = Math.min(tryMs, duration - 5000); }
+        tryMs = Math.max(1000, tryMs);
+        var r = {
+            m: step.m, ms: tryMs, dir: plan.dir, target: plan.target, at: Date.now(),
+            played: false, playedAt: 0, seekIssued: false,
+            firstMs: -1,              // metodo 'playing': 1o playtime (p/ ver o video andar antes do seek)
+            farFrom: -1,              // 1o playtime longe do alvo depois do seek (seek ignorado?)
+            nearMs: -1, nearAt: 0     // 1o playtime perto do alvo (p/ ver se o video anda)
+        };
+        resumeAttempt = r;
         seekTarget   = tryMs;
         seekingUntil = Date.now() + RESUME_TIMEOUT + 5000;
+        position     = tryMs;                     // so p/ a barra; lastPlayedMs e o real
+        UI.showSpinner(true);
         armResumeWatchdog();
-        try {
-            avplay.seekTo(tryMs, function () {
-                if (gen !== loadGen || !resumeAttempt) { return; }
-                console.log('[Player] retomada confirmada em', tryMs);
-                resumeOk();
-            }, function (err) {
-                if (gen !== loadGen || !resumeAttempt) { return; }
-                console.warn('[Player] seek de retomada recusado em', tryMs, err && err.message);
-                resumeFail();
-            });
-            position = tryMs;
-        } catch (e) {
-            console.error('[AVPlay] seekTo inicial', e);
-            resumeFail();
+        console.log('[Player] ' + (r.dir > 0 ? 'pulando trecho' : 'retomada') + ': tentativa ' + (plan.step + 1) + '/' +
+                    plan.length + ' em ' + fmtTime(tryMs) + ' (' + methodName(r.m) + ')');
+        if (r.m === 'ready') { issueResumeSeek(r); }   // play() so quando o seek terminar
+        else { startPlay(r); }                          // seek quando o video estiver andando
+    }
+
+    /* playtime durante a retomada */
+    function noteResumePlaytime(r, ms) {
+        if (r.m === 'playing' && !r.seekIssued) {
+            if (r.firstMs < 0) { r.firstMs = ms; }
+            else if (ms >= r.firstMs + 500) {
+                console.log('[Player] video andando em ' + fmtTime(ms) + '; pedindo o seek');
+                issueResumeSeek(r);
+            }
+            checkResumeTimeout();
+            return;
         }
+        if (!r.played) { checkResumeTimeout(); return; }   // antes do play() nao conta
+        if (nearResume(r, ms)) {
+            if (r.nearMs < 0 || ms < r.nearMs) { r.nearMs = ms; r.nearAt = Date.now(); }
+            if (ms >= r.nearMs + 1000) { resumeOk(); return; }
+        } else {
+            if (r.farFrom < 0) { r.farFrom = ms; }
+            else if (ms - r.farFrom > (r.m === 'ready' ? 3000 : RESUME_IGNORED_TOL)) {
+                resumeFailed(r, 'seek ignorado (tocando em ' + fmtTime(ms) + ')');
+                return;
+            }
+        }
+        checkResumeTimeout();
     }
 
     function resumeOk() {
-        clearResumeWatchdog();
-        resumeAttempt = null;
-        pendingSeek   = 0;             // seekingUntil segue ate o playtime voltar (spinner + sem falso "travou")
-    }
-
-    function resumeFail() {
-        clearResumeWatchdog();
         var r = resumeAttempt;
         if (!r) { return; }
-        if (r.attempt + 1 < RESUME_BACKOFF.length) {
-            console.warn('[Player] tentando retomar um pouco antes do ponto salvo...');
-            resumeSeek(r.target, r.attempt + 1);
+        console.log('[Player] ' + (r.dir > 0 ? 'trecho pulado' : 'retomada confirmada') + ' em ' +
+                    fmtTime(lastPlayedMs || r.ms) + ' (' + methodName(r.m) + ')');
+        // so memoriza o metodo quando ele foi a diferenca: retomada normal, no ponto
+        // exato (sucesso pulando trecho / recuando nao diz nada sobre o metodo)
+        if (r.dir < 0 && Math.abs(r.ms - r.target) < 1000 && PrefStore.get('resumeMethod') !== r.m) {
+            PrefStore.set('resumeMethod', r.m);
+            console.log('[Player] metodo de retomada preferido agora: ' + methodName(r.m));
+        }
+        clearResumeWatchdog();
+        resumeAttempt = null;
+        resumePlan    = null;
+        seekingUntil  = 0;
+        seekTarget    = 0;
+        stallSince    = 0;
+        stallStep     = 0;
+        lastPlayMs    = position;
+        UI.showSpinner(false);
+    }
+
+    /* a tentativa falhou: esse player fica num estado ruim (congelado, seek
+     * recusado, erro), entao a proxima e SEMPRE num player reaberto */
+    function resumeFailed(r, why) {
+        if (resumeAttempt !== r) { return; }
+        resumeAttempt = null;
+        clearResumeWatchdog();
+        seekingUntil = 0;
+        seekTarget   = 0;
+        var plan = resumePlan;
+        console.warn('[Player] tentativa ' + (plan ? plan.step + 1 : '?') + ' (' + methodName(r.m) + ') falhou: ' + why);
+        if (plan && plan.step + 1 < plan.length && reopenCount < 6) {
+            plan.step++;
+            reopenCount++;
+            UI.toast(r.dir > 0 ? 'Pulando um trecho com problema do arquivo...' : 'Retomando de outro jeito...');
+            loadAvplay(currentUri);
             return;
         }
-        resumeAttempt = null;
-        pendingSeek   = 0;
-        seekingUntil  = 0;
-        resumeMs      = 0;
-        UI.toast('Nao consegui retomar do ponto salvo. Ele continua salvo: use avancar.');
-        loadAvplay(currentUri);                  // recomeca do zero (resumeGuard protege o ponto salvo)
+        resumePlan = null;
+        UI.showSpinner(false);
+        if (r.dir > 0) {
+            console.warn('[Player] nao consegui passar do trecho em', fmtTime(r.target));
+            UI.toast('Nao consegui passar desse trecho do arquivo (' + fmtTime(r.target) + '). O ponto ficou salvo.');
+            stopAndGoHome();
+            return;
+        }
+        console.warn('[Player] retomada desistiu; tocando do inicio (ponto salvo ' + fmtTime(r.target) + ' preservado)');
+        UI.toast('Nao consegui voltar ao ponto salvo (' + fmtTime(r.target) + '). Comecando do inicio - o ponto continua salvo.');
+        resumeMs = 0;
+        loadAvplay(currentUri);            // sem plano: abre e toca do inicio (isso sempre funcionou)
     }
 
     function loadAvplay(fileUri) {
@@ -379,9 +558,11 @@ var Player = (function () {
         loadGen++;
         resumeAttempt = null;
 
-        currentUri  = fileUri;
-        started     = false;
-        pendingSeek = (validMs(resumeMs) && resumeMs >= 1000) ? resumeMs : 0;
+        currentUri   = fileUri;
+        started      = false;
+        lastPlayedMs = 0;
+        var step = (resumePlan && resumePlan.step < resumePlan.length) ? resumePlan[resumePlan.step] : null;
+        if (step) { resumeGuard = Math.max(resumeGuard, resumePlan.target); }
         document.body.classList.add('playing');   // deixa a pagina transparente
         UI.showSpinner(true);
 
@@ -394,78 +575,63 @@ var Player = (function () {
             onbufferingprogress: function (p)  {
                 var pct = (position + (p / 100) * (duration - position)) / duration * 100;
                 UI.setBuffered(pct);
+                checkResumeTimeout();
             },
             onbufferingcomplete: function ()   {
-                UI.showSpinner(false);
-                // fallback: se o seek de retomada ainda nao pegou (rebuffer tardio)
-                if (pendingSeek && duration > 0 && pendingSeek < duration - 2000) {
-                    var s = pendingSeek;
-                    try { avplay.seekTo(s); } catch (e) {}
-                }
+                var r = resumeAttempt;
+                if (!r) { UI.showSpinner(false); return; }
+                // metodo 'ready': buffer pronto depois do seek = pode dar play
+                // (caso o callback do seek demore ou nao venha)
+                if (r.m === 'ready' && r.seekIssued && !r.played) { startPlay(r, 'buffer pronto apos o seek'); return; }
+                checkResumeTimeout();
             },
             onstreamcompleted:   function ()   { clearWatchdog(); handleEnded(); },
             onerror: function (err) {
                 clearWatchdog();
-                console.error('[AVPlay] erro:', err);
-                if (resumeAttempt) { resumeFail(); return; }   // erro durante a retomada: proxima tentativa
+                console.error('[AVPlay] erro:', err, '(estado ' + avState() + ')');
+                if (resumeAttempt) { resumeFailed(resumeAttempt, 'erro do player: ' + err); return; }
                 UI.showSpinner(false);
                 saveProgress();                       // nao perde o ponto atual
-                // erro bateu com um seek de retomada em andamento: provavelmente
-                // e o proprio alvo que o AVPlay esta recusando (indice/keyframe
-                // quebrado nesse ponto do arquivo) - guarda p/ a proxima abertura
-                // (automatica OU manual, via Continuar assistindo) pular esse seek
-                // e comecar do zero, em vez de repetir a mesma falha sem parar.
-                var wasResumeSeek = Date.now() < seekingUntil && !!seekTarget;
-                if (wasResumeSeek) {
-                    rememberFailedSeek(currentUri, seekTarget);
-                }
-                if (wasResumeSeek && reopenCount < 3) {
-                    // a falha e no seek de retomada, nao no arquivo - reabre do
-                    // zero direto (mesmo que nenhum frame tenha chegado a
-                    // aparecer ainda), em vez de cair no "Erro ao reproduzir"
-                    // sem nunca tentar tocar o episodio.
+                seekingUntil = 0;
+                seekTarget   = 0;
+                if (reopenCount < 2 && started && lastPlayedMs >= 1000) {
                     reopenCount++;
-                    seekingUntil = 0;
-                    resumeMs = 0;
-                    UI.toast('Nao consegui retomar do ponto salvo, comecando do inicio...');
-                    loadAvplay(currentUri);
-                } else if (started && reopenCount < 2) {     // tenta reabrir
-                    reopenCount++;
-                    resumeMs = seekKnownBad(currentUri, position) ? 0 : position;
                     UI.toast('Recuperando a reproducao...');
-                    loadAvplay(currentUri);
+                    reopenAt(lastPlayedMs, -1, 'erro do player');   // onde estava TOCANDO
                 } else {
                     UI.toast('Erro ao reproduzir: ' + (err && err.message || err));
                 }
             },
             oncurrentplaytime: function (ms) {
-                if (!started && ms > 0) {           // 1o frame renderizado
-                    started = true;
-                    clearWatchdog();
-                    UI.showSpinner(false);
-                }
-                if (seekingUntil && ms > 0 &&
-                    (!seekTarget || ms > seekTarget || Math.abs(ms - seekTarget) < 12000)) {
-                    seekingUntil = 0;              // seek concluiu, playtime voltou
-                    stallSince = 0;
-                    clearResumeWatchdog();
-                    resumeAttempt = null;
-                    UI.showSpinner(false);
-                }
-                if (pendingSeek) {
-                    // seek inicial ignorado (comecou do zero) -> tenta 1x mais
-                    if (started && ms > 0 && ms < 5000 && pendingSeek > 15000) {
-                        var s = pendingSeek; pendingSeek = 0;
-                        try { avplay.seekTo(s); } catch (e) {}
-                        return;
+                if (ms > 0) {
+                    lastPlayedMs = ms;
+                    if (!started) {                     // 1o frame renderizado
+                        started = true;
+                        clearWatchdog();
+                        if (!resumeAttempt) { UI.showSpinner(false); }
                     }
-                    // ja passou do ponto salvo (caiu no keyframe) -> retomada concluida
-                    if (ms >= pendingSeek - 1500) { pendingSeek = 0; }
+                }
+                var r = resumeAttempt;
+                if (r && ms > 0) {
+                    noteResumePlaytime(r, ms);
+                } else if (r) {
+                    checkResumeTimeout();
+                } else if (seekingUntil && seekTarget && ms > 0 && Math.abs(ms - seekTarget) < 15000) {
+                    seekingUntil = 0;              // seek do usuario concluiu, playtime voltou
+                    seekTarget   = 0;
+                    stallSince   = 0;
+                    resumeGuard  = 0;              // o usuario levou o video pra outro ponto de verdade
+                    UI.showSpinner(false);
+                }
+                if (resumeAttempt) {               // ainda retomando: barra mostra o alvo, nada de botoes
+                    UI.updateProgress(position, duration);
+                    return;
                 }
                 position = ms;
                 UI.updateProgress(position, duration);
                 UI.updateSkip(position, duration);
                 UI.updateCredits(position, duration);
+                autoSave();                        // nao depende so do tick
             }
         });
 
@@ -481,16 +647,14 @@ var Player = (function () {
             duration = avplay.getDuration();
             if (!validMs(duration)) { duration = 0; }   // ver validMs() acima
             readTracks();
-            // retomada: faz o seek AGORA (estado READY), antes do play().
-            // onbufferingcomplete durante o prepare roda com duration=0 e nao seekava.
-            if (pendingSeek && duration > 0 && pendingSeek < duration - 2000) {
-                resumeSeek(pendingSeek, 0);
-            } else {
-                pendingSeek = 0;
-            }
             UI.updateProgress(position, duration);
-            try { avplay.play(); } catch (e) { console.error('[AVPlay] play()', e); }
-            startTick();
+            startTick();                               // antes do beginResume (zera seekingUntil)
+            if (step && duration > 0 && step.at < duration - 2000) {
+                beginResume(step);                     // o play() fica a cargo do metodo
+            } else {
+                resumePlan = null;
+                try { avplay.play(); } catch (e) { console.error('[AVPlay] play()', e); }
+            }
         }, function (err) {
             clearWatchdog();
             UI.showSpinner(false);
@@ -529,6 +693,12 @@ var Player = (function () {
     /* --- controles --- */
 
     function togglePlay() {
+        var r = resumeAttempt;
+        if (App.usingAvplay && r && !r.played) {   // retomada esperando o seek: a tecla so antecipa o play
+            startPlay(r, 'tecla play/pause');
+            isPaused = false;
+            return isPaused;
+        }
         if (App.usingAvplay) {
             if (isPaused) { avplay.play(); } else { avplay.pause(); }
         } else {
@@ -702,12 +872,33 @@ var Player = (function () {
 
     function seekTo(ms) {
         var target = Math.max(0, Math.min(ms, duration - 1000));
-        resumeGuard = 0;                       // o usuario assumiu o controle da posicao
-        if (resumeAttempt) { clearResumeWatchdog(); resumeAttempt = null; pendingSeek = 0; }
+        if (resumeAttempt) {                   // o usuario assumiu durante a retomada
+            var r = resumeAttempt;
+            clearResumeWatchdog();
+            resumeAttempt = null;
+            resumePlan    = null;
+            if (App.usingAvplay && !r.played) { try { avplay.play(); } catch (e) {} }
+        }
         if (App.usingAvplay) {
+            // o ponto salvo (resumeGuard) so e liberado quando o seek CONFIRMA
+            // (oncurrentplaytime): seek recusado nao pode gravar o alvo
+            var gen = loadGen, before = lastPlayedMs;
             markSeek(target);
-            try { avplay.seekTo(target); } catch (e) { console.error('[AVPlay] seekTo', e); }
+            try {
+                // com callbacks: sem o de erro, a falha estoura dentro do
+                // webapis.js ("Script error") em vez de cair aqui
+                avplay.seekTo(target, function () {}, function (err) {
+                    if (gen !== loadGen) { return; }
+                    console.warn('[Player] seek recusado em', fmtTime(target), err && err.message, '(estado ' + avState() + ')');
+                    seekingUntil = 0;
+                    seekTarget   = 0;
+                    if (before) { position = before; }
+                    UI.showSpinner(false);
+                    UI.toast('Nao consegui ir para esse ponto do video.');
+                });
+            } catch (e) { console.error('[AVPlay] seekTo', e && e.message); }
         } else {
+            resumeGuard = 0;
             html5.currentTime = target / 1000;
         }
         position = target;
@@ -719,6 +910,9 @@ var Player = (function () {
         stopTick();
         clearWatchdog();
         clearResumeWatchdog();
+        if (resumeAttempt) { console.log('[Player] parado durante a retomada (ponto salvo preservado)'); }
+        resumeAttempt = null;
+        loadGen++;                             // ignora callbacks atrasados desta abertura
         UI.showSpinner(false);
         UI.hideSkip();
         UI.closeSettings();
@@ -745,24 +939,43 @@ var Player = (function () {
         lastPlayMs   = position;
         stallSince   = 0;
         stallStep    = 0;
-        seekingUntil = 0;
-        saveProgress();                        // grava logo o ponto inicial
+        if (!resumeAttempt) { seekingUntil = 0; }   // retomada em curso mantem a protecao dela
+        saveProgress();                        // grava logo o ponto inicial (nao grava durante a retomada)
         tickTimer = setInterval(function () {
+            checkResumeTimeout();
             if (isPaused) { return; }
-            saveProgress();
+            autoSave();
             checkStall();
         }, 3000);                              // grava / verifica a cada 3s
+    }
+
+    /* gravacao periodica (~3 s): chamada pelo tick E por cada playtime do
+     * AVPlay - os timers do JS podem parar de disparar com o player ativo
+     * nessa TV, e ai o progresso so seria salvo ao pausar/sair */
+    var lastAutoSave = 0;
+    function autoSave() {
+        if (isPaused) { return; }
+        var now = Date.now();
+        if (now - lastAutoSave < 3000) { return; }
+        lastAutoSave = now;
+        saveProgress();
     }
     function stopTick() {
         if (tickTimer) { clearInterval(tickTimer); tickTimer = null; }
     }
 
     /* Detecta "congelou do nada": position parada por varios segundos com o
-     * video tocando (e SEM seek em andamento). Escada de recuperacao, do mais
-     * leve pro mais forte: reemite play/seek -> reabre no ponto -> desiste.
+     * video tocando (e SEM seek em andamento). Escada de recuperacao:
+     *   12 s -> reemite play();
+     *   22 s -> REABRE o arquivo nesse ponto usando a mesma maquina da retomada
+     *           para FRENTE (dir +1): os dois metodos no ponto e, se nao der,
+     *           30 s adiante - nunca seek dentro do player parado (falha com
+     *           PLAYER_ERROR_SEEK_FAILED nessa TV) e nunca recomeca do zero;
+     *   38 s -> desiste e volta pra tela inicial.
      * Nao usa pause()+play(): interrompe seek em curso e trava o AVPlay. */
     function checkStall() {
         if (!App.usingAvplay || !started) { return; }
+        if (resumeAttempt) { return; }               // a retomada tem o proprio controle de tempo
         if (Date.now() < seekingUntil) { return; }   // seek/rebuffer normal, nao e travamento
 
         if (position !== lastPlayMs) {         // avancou normalmente
@@ -780,18 +993,20 @@ var Player = (function () {
 
         if (stallStep === 0) {
             stallStep = 1;
+            console.warn('[Player] video parado em ' + fmtTime(position) + ' (estado ' + avState() + ')');
             UI.toast('Recuperando a reproducao...');
-            try {
-                avplay.play();                            // reemite play
-                if (seekTarget) { avplay.seekTo(seekTarget); }  // e o ultimo seek, se houver
-            } catch (e) {}
+            try { avplay.play(); } catch (e) {}  // reemite play (seek aqui falha com o player parado)
         } else if (stallStep === 1 && stuck >= 22000) {
             stallStep = 2;
-            if (currentUri && reopenCount < 2) {
-                if (seekTarget) { rememberFailedSeek(currentUri, seekTarget); }
+            if (duration > 0 && position >= duration - 20000) {     // travou nos creditos: encerra
+                console.warn('[Player] travou perto do fim (' + fmtTime(position) + '); encerrando o episodio');
+                handleEnded();
+                return;
+            }
+            if (currentUri && reopenCount < 4) {
                 reopenCount++;
-                resumeMs = seekKnownBad(currentUri, position) ? 0 : position;
-                loadAvplay(currentUri);        // reabre no ponto salvo (ou do zero, se o alvo e suspeito)
+                UI.toast('Recuperando a reproducao...');
+                reopenAt(position, 1, 'travou em ' + fmtTime(position) + ' (estado ' + avState() + ')');
             } else {
                 stallStep = 2.5;              // sem mais reaberturas -> proximo passo desiste
             }
@@ -805,7 +1020,12 @@ var Player = (function () {
 
     function saveProgress() {
         if (!App.playingPath || duration <= 0) { return; }
-        // retomada ainda nao confirmada / caiu no comeco: nao sobrescreve o ponto salvo
+        if (resumeAttempt) { return; }         // retomada em andamento: posicao ainda nao e real
+        // player (re)aberto que ainda nao tocou nada: posicao nao e real (o
+        // ponto salvo regredia gravando o alvo de uma tentativa no meio da troca)
+        if (App.usingAvplay && !started) { return; }
+        if (seekTarget && Date.now() < seekingUntil) { return; }   // seek pendente: posicao otimista
+        // retomada falhou / caiu no comeco: nao sobrescreve o ponto salvo
         if (resumeGuard && position < resumeGuard - 30000) { return; }
         ProgressStore.save({
             path:     App.playingPath,
@@ -821,6 +1041,7 @@ var Player = (function () {
     return {
         init: init, load: load, togglePlay: togglePlay, seekBy: seekBy, seekTo: seekTo,
         stop: stop, saveProgress: saveProgress,
+        poke: checkResumeTimeout,              // tecla do controle: reconfere o prazo da retomada
         selectAudio: selectAudio, selectText: selectText,
         getPosition: function () { return position; },
         getDuration: function () { return duration; },
@@ -830,28 +1051,64 @@ var Player = (function () {
 
 
 /* ============================================================================
- * 3. PROGRESS STORE  (localStorage)
- *    Chave unica por arquivo (fullPath). Guarda posicao, duracao e "done".
+ * 3. PROGRESS STORE  (HD + localStorage)
+ *    Chave por arquivo = caminho relativo a biblioteca. Guarda posicao,
+ *    duracao, "done" e "updated".
  * ==========================================================================*/
 
 /* ProgressStore - "Continuar assistindo".
  *
  * O localStorage sozinho NAO e confiavel aqui: ele fica dentro do sandbox do
  * app e ja se perdeu/voltou no tempo depois de reinstalacoes (aconteceu
- * durante os testes do NetUpload em Set/2026). Agora ele so serve de cache
- * rapido pro boot - a fonte de verdade e um arquivo de verdade no HD
- * (AmorecoFlix/progresso.json, mesmo padrao do skip.json), que sobrevive a
- * qualquer reinstalacao do app porque fica fora do sandbox dele. */
+ * durante os testes do NetUpload em Set/2026). Por isso o progresso tambem
+ * vai para um arquivo de verdade no HD (AmorecoFlix/progresso.json, mesmo
+ * padrao do skip.json), que sobrevive a qualquer reinstalacao do app porque
+ * fica fora do sandbox dele. Ao abrir, os dois sao mesclados por episodio. */
 var ProgressStore = (function () {
 
     var KEY = 'meuplayer.progress.v1';
     var FILE_NAME = 'progresso.json';
     var BAK_NAME  = 'progresso.bak.json';   // copia do anterior: se faltar energia no meio da gravacao
     var DISK_EVERY = 30000;                 // localStorage a cada save; HD no maximo a cada 30 s
-    var cache = load();
     var libDir = null;
+    var cache = normalize(load());
     var writing = false, pendingWrite = false;
     var dirty = false, lastDisk = 0;
+
+    /* Chave = caminho RELATIVO a pasta da biblioteca ("Series/Show/.../ep.mkv").
+     * Antes era o caminho completo na TV ("/opt/media/USBDriveA1/AmorecoFlix/..."):
+     * se a TV montasse o HD com outro nome (outra porta, HD religado depois de
+     * ir ao PC), todo o progresso "sumia". Caminho fora da biblioteca fica completo. */
+    function keyOf(p) {
+        p = String(p || '');
+        var base = libDir && libDir.fullPath;
+        if (base && p.indexOf(base + '/') === 0) { return p.slice(base.length + 1); }
+        var marker = '/' + LIBRARY_DIR.toLowerCase() + '/';
+        var i = p.toLowerCase().indexOf(marker);
+        return i !== -1 ? p.slice(i + marker.length) : p;
+    }
+    /* caminho completo atual (no HD montado agora) de uma chave */
+    function fullOf(k) {
+        if (k.charAt(0) === '/' || !libDir || !libDir.fullPath) { return k; }
+        return libDir.fullPath + '/' + k;
+    }
+
+    /* converte um mapa antigo (chaves completas) p/ chaves relativas; se duas
+       chaves viram a mesma (montagens diferentes do HD), fica a mais recente */
+    function normalize(obj) {
+        var out = {};
+        for (var k in obj) {
+            if (!obj.hasOwnProperty(k)) { continue; }
+            var r = obj[k];
+            if (!r || typeof r !== 'object') { continue; }
+            var nk = keyOf(k);
+            if (out[nk] && (out[nk].updated || 0) >= (r.updated || 0)) { continue; }
+            r.path = nk;
+            r.dir  = dirName(nk);
+            out[nk] = r;
+        }
+        return out;
+    }
 
     function load() {
         try { return JSON.parse(localStorage.getItem(KEY)) || {}; }
@@ -862,20 +1119,30 @@ var ProgressStore = (function () {
         catch (e) { console.error('[Store] localStorage cheio?', e); }
     }
 
-    /* chamado pelo scanUsb() assim que a pasta AmorecoFlix e encontrada -
-       o arquivo no HD manda: se existir, substitui o que tiver no cache
-       (inclusive o que veio do localStorage, que pode estar desatualizado).
-       progresso.json corrompido (queda de energia na gravacao) -> usa o .bak. */
+    /* chamado pelo scanUsb() assim que a pasta AmorecoFlix e encontrada.
+       Junta o arquivo do HD com o cache local registro a registro, ficando
+       com o mais recente de cada episodio (campo "updated"): o HD sobrevive
+       a reinstalacoes do app, e o local tem o que ainda nao foi pro HD
+       (gravado no maximo a cada 30 s). progresso.json corrompido -> .bak. */
     function loadFromDisk(libraryDir) {
         libDir = libraryDir;
         if (!libDir || !libDir.fullPath) { return; }
-        if (dirty) { flush(); return; }          // reescaneio com algo ainda nao gravado: o local e mais novo
+        cache = normalize(cache);                  // agora da pra tirar o prefixo real do HD
         var base = libDir.fullPath + '/';
 
         function use(obj, from) {
-            cache = obj;
+            var disk = normalize(obj), out = {}, k, newerLocal = 0;
+            for (k in disk) { if (disk.hasOwnProperty(k)) { out[k] = disk[k]; } }
+            for (k in cache) {
+                if (!cache.hasOwnProperty(k)) { continue; }
+                if (!out[k] || (cache[k].updated || 0) > (out[k].updated || 0)) { out[k] = cache[k]; newerLocal++; }
+            }
+            cache = out;
             persistLocal();
-            console.log('[Store] progresso carregado do HD (' + from + ', ' + Object.keys(cache).length + ' itens)');
+            console.log('[Store] progresso do HD (' + from + '): ' + Object.keys(cache).length +
+                        ' itens, ' + newerLocal + ' mais novos no cache local');
+            if (newerLocal) { dirty = true; flush(); }
+            else if (window.DebugLog) { DebugLog.persist(); }   // log do boot vai pro HD
             if (window.UI && UI.renderContinue) { UI.renderContinue(); }
         }
         function parse(txt) {
@@ -885,14 +1152,13 @@ var ProgressStore = (function () {
         function tryBackup(mainExists) {
             readTextFile(base + BAK_NAME, function (txt) {
                 var o = parse(txt);
-                if (o) { use(o, BAK_NAME); writeToDisk(); return; }   // reconstroi o principal
+                if (o) { use(o, BAK_NAME); dirty = true; flush(); return; }   // reconstroi o principal
                 console.warn('[Store] progresso.json e .bak invalidos - mantendo o cache local');
-                if (Object.keys(cache).length) { writeToDisk(); }
+                if (Object.keys(cache).length) { dirty = true; flush(); }
             }, function () {
                 if (mainExists) { console.warn('[Store] progresso.json invalido e sem .bak'); }
-                /* ainda nao existe no HD - se ja tem progresso local (versao
-                   anterior a essa mudanca), migra pra ele agora */
-                if (Object.keys(cache).length) { writeToDisk(); }
+                /* ainda nao existe no HD - se ja tem progresso local, migra pra ele agora */
+                if (Object.keys(cache).length) { dirty = true; flush(); }
             });
         }
         readTextFile(base + FILE_NAME, function (txt) {
@@ -944,6 +1210,7 @@ var ProgressStore = (function () {
 
     /* grava no HD agora, se houver algo pendente (pausa, parada, saida do app) */
     function flush() {
+        if (window.DebugLog) { DebugLog.persist(); }
         if (!dirty) { return; }
         dirty = false;
         lastDisk = Date.now();
@@ -958,40 +1225,50 @@ var ProgressStore = (function () {
         if (urgent || Date.now() - lastDisk >= DISK_EVERY) { flush(); }
     }
 
-    /** Salva/atualiza o registro de um arquivo. */
+    /** Salva/atualiza o registro de um arquivo (rec.path = caminho completo). */
     function save(rec) {
-        cache[rec.path] = rec;
+        var k = keyOf(rec.path);
+        rec.path = k;
+        rec.dir  = dirName(k);
+        cache[k] = rec;
         persist(false);
     }
 
-    /** Retorna o registro de um arquivo (ou null). */
+    /** Retorna o registro de um arquivo pelo caminho completo (ou null). */
     function get(path) {
-        return cache[path] || null;
+        return cache[keyOf(path)] || null;
     }
 
     /** Marca como concluido e zera a posicao (para nao aparecer em "continuar"). */
     function markComplete(path) {
-        if (cache[path]) {
-            cache[path].done = true;
-            cache[path].position = 0;
-            cache[path].updated = Date.now();
+        var r = cache[keyOf(path)];
+        if (r) {
+            r.done = true;
+            r.position = 0;
+            r.updated = Date.now();
             persist(true);
         }
     }
 
-    /** Lista de itens NAO concluidos, mais recentes primeiro (aba Continuar Assistindo). */
+    /** Itens NAO concluidos, mais recentes primeiro (aba Continuar Assistindo).
+        Devolve copias com path = caminho completo no HD montado agora. */
     function continueList(limit) {
         var arr = [];
         for (var p in cache) {
             if (!cache.hasOwnProperty(p)) { continue; }
             var r = cache[p];
-            if (r && !r.done && r.position >= 1000) { arr.push(r); }
+            if (r && !r.done && r.position >= 1000) {
+                var c = {};
+                for (var f in r) { if (r.hasOwnProperty(f)) { c[f] = r[f]; } }
+                c.path = fullOf(p);
+                arr.push(c);
+            }
         }
         arr.sort(function (a, b) { return b.updated - a.updated; });
         return limit ? arr.slice(0, limit) : arr;
     }
 
-    function remove(path) { delete cache[path]; persist(true); }
+    function remove(path) { delete cache[keyOf(path)]; persist(true); }
     function clearAll()   { cache = {}; persist(true); }
 
     return {
@@ -2331,6 +2608,7 @@ function onKeyDown(ev) {
 
     // ---------------- PLAYER ----------------
     if (onPlayer) {
+        Player.poke();                       // retomada presa sem eventos/timers: a tecla destrava
         // parar/voltar funciona sempre
         if (code === KEY.STOP || code === KEY.RETURN) { stopAndGoHome(); return; }
 
@@ -2489,9 +2767,6 @@ function boot() {
     NetUpload.startAutoConnect();
 }
 
-/* Pasta-raiz da biblioteca dentro do HD. Nada fora dela e mostrado. */
-var LIBRARY_DIR = 'AmorecoFlix';
-
 function scanUsb() {
     UI.setUsbStatus('Procurando HD USB...');
     mapUsb(function (storages) {
@@ -2566,9 +2841,8 @@ function onEntryActivate(index) {
         App.dirStack.push(App.currentDir);
         enterDirectory(entry.file);
     } else {
-        var rec = ProgressStore.get(entry.file.fullPath);
         App.playlist = App.dirFiles.filter(function (e) { return !e.isDir; });
-        openVideo(entry, rec ? rec.position : 0);
+        openVideo(entry, savedPosition(entry));
     }
 }
 
@@ -2675,10 +2949,17 @@ function openVideoByPath(fullPath, resumeMs) {
     });
 }
 
+/* ponto salvo de um episodio (0 se nunca abriu ou ja foi assistido) - sem
+ * isso o proximo episodio abria do zero e apagava o progresso dele */
+function savedPosition(entry) {
+    var rec = ProgressStore.get(entry.file.fullPath);
+    return (rec && !rec.done) ? (rec.position || 0) : 0;
+}
+
 function onVideoEnded() {
     var next = findNextEpisode(App.playingPath);
     if (next) {
-        UI.showNextToast(next, function () { openVideo(next, 0); });
+        UI.showNextToast(next, function () { openVideo(next, savedPosition(next)); });
     } else {
         stopAndGoHome();
     }
@@ -2690,7 +2971,7 @@ function playNextEpisode(fromCredits) {
         var prev = App.playingPath;
         Player.stop();
         if (fromCredits === true) { ProgressStore.markComplete(prev); }   // viu ate os creditos
-        openVideo(next, 0);
+        openVideo(next, savedPosition(next));
     }
     else { UI.toast('Este e o ultimo episodio da pasta.'); }
 }

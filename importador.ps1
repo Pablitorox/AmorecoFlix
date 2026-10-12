@@ -628,8 +628,9 @@ function Update-LibraryRefs($renames) {
         } catch { Log "  creditos-analisados.json nao atualizado: $($_.Exception.Message)" }
     }
 
-    # progresso.json (+ .bak) da TV: chave = caminho completo NA TV, que
-    # termina com o caminho relativo a biblioteca
+    # progresso.json (+ .bak) da TV: chave = caminho relativo a biblioteca
+    # ("Series/Show/.../ep.mkv"); versoes antigas do app usavam o caminho
+    # completo na TV ("/opt/media/.../AmorecoFlix/Series/..."), que termina com ele
     foreach ($pf in 'progresso.json', 'progresso.bak.json') {
         $progFile = Join-Path $HdRoot $pf
         if (-not (Test-Path -LiteralPath $progFile)) { continue }
@@ -637,14 +638,16 @@ function Update-LibraryRefs($renames) {
             $raw = [IO.File]::ReadAllText($progFile) | ConvertFrom-Json
             $changed = $false
             foreach ($r in $renames) {
-                $oldRel = '/' + (Rel-LibPath $r.Old); $newRel = '/' + (Rel-LibPath $r.New)
+                $oldRel = Rel-LibPath $r.Old; $newRel = Rel-LibPath $r.New
                 foreach ($p in @($raw.PSObject.Properties)) {
-                    if (-not $p.Name.EndsWith($oldRel, [StringComparison]::OrdinalIgnoreCase)) { continue }
-                    $newKey = $p.Name.Substring(0, $p.Name.Length - $oldRel.Length) + $newRel
+                    if ($p.Name -ieq $oldRel) { $newKey = $newRel }
+                    elseif ($p.Name.EndsWith('/' + $oldRel, [StringComparison]::OrdinalIgnoreCase)) {
+                        $newKey = $p.Name.Substring(0, $p.Name.Length - $oldRel.Length) + $newRel
+                    } else { continue }
                     $rec = $p.Value
                     $rec.path = $newKey
                     $rec.name = $newKey.Substring($newKey.LastIndexOf('/') + 1)
-                    if ($rec.PSObject.Properties['dir']) { $rec.dir = $newKey.Substring(0, $newKey.LastIndexOf('/')) }
+                    if ($rec.PSObject.Properties['dir']) { $rec.dir = $newKey.Substring(0, [Math]::Max(0, $newKey.LastIndexOf('/'))) }
                     $raw.PSObject.Properties.Remove($p.Name)
                     $raw | Add-Member -NotePropertyName $newKey -NotePropertyValue $rec -Force
                     $changed = $true
