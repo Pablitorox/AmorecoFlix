@@ -15,6 +15,22 @@ legendas, detectar créditos e checar se o arquivo vai tocar na TV.
 >
 > O projeto não inclui nem baixa vídeos: ele só toca o que já está no seu HD.
 
+![Início do AmorecoFlix](docs/screenshots/inicio.jpg)
+
+## Telas
+
+| | |
+|---|---|
+| ![Página da série](docs/screenshots/serie.jpg) **Página da série**: temporadas, episódios com título e progresso | ![Biblioteca](docs/screenshots/biblioteca.jpg) **Biblioteca**: pôsteres com filtros |
+| ![Opções](docs/screenshots/opcoes.jpg) **Opções**: segurar OK num card | ![Pastas](docs/screenshots/pastas.jpg) **Pastas**: o HD do jeito que está organizado |
+| ![Player](docs/screenshots/player.jpg) **Player**: barra, ±10 s, episódios, áudio e legendas | ![Avanço acelerado](docs/screenshots/player-avanco.jpg) **Avanço**: segurar ◀ ▶ acelera, com balão |
+| ![Áudio e legendas](docs/screenshots/player-legendas.jpg) **Áudio e legendas**: a escolha vale para a série | ![Episódios no player](docs/screenshots/player-episodios.jpg) **Episódios**: troca sem sair do vídeo |
+
+<sub>Capturas do [simulador](#simulador-testar-sem-a-tv) com uma biblioteca de demonstração:
+Pioneer One (Creative Commons), A Família Buscapé (episódios em domínio público),
+curtas abertos da Blender Foundation, Nosferatu (1922) e A Noite dos Mortos-Vivos
+(1968). Imagens e textos do TMDB.</sub>
+
 ## O que o app faz
 
 - **Início**: destaque com o que você está vendo, **Continuar assistindo** e
