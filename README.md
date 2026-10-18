@@ -52,6 +52,9 @@ curtas abertos da Blender Foundation, Nosferatu (1922) e A Noite dos Mortos-Vivo
   dessa TV trava no seek (detalhes em [Como funciona](#como-funciona)).
 - **Progresso no HD** (`progresso.json` + backup): sobrevive a reinstalar o app
   e a trocar o HD de porta.
+- **Histórico de assistidos** (`assistidos.json`): o que você já viu fica
+  salvo mesmo depois de apagar o arquivo; baixou de novo (outro nome, outra
+  qualidade), volta marcado como assistido.
 - Ignora sozinho os vídeos de propaganda que vêm junto dos torrents.
 
 ## Estrutura do HD
@@ -75,7 +78,8 @@ AmorecoFlix/
 ├── subs/        legendas externas       (organizar-subs.ps1)
 ├── meta/        biblioteca.json, fundos/, posters/   (metadados.ps1)
 ├── skip.json    abertura, encerramento e créditos    (skip-anime.ps1, detectar-creditos.ps1)
-└── progresso.json   gravado pelo app
+├── progresso.json   gravado pelo app
+└── assistidos.json  histórico de assistidos (gravado pelo app)
 ```
 
 As pastas de temporada são reconhecidas como `Nome - 2ª Temporada`,
@@ -205,6 +209,12 @@ lógica, reabrindo o arquivo um pouco à frente em vez de recomeçar.
 pausar, parar ou sair. A chave é o caminho relativo à biblioteca, então não
 importa com que nome a TV monta o HD. Ao abrir, os dois são mesclados episódio
 a episódio (fica o mais recente). Passou de 92% do vídeo, conta como assistido.
+
+**Assistidos.** O `progresso.json` é por caminho; o `assistidos.json` (+ `.bak`)
+guarda o "já vi" por equivalência: série + TxEy (numeração do
+`biblioteca.json` ou do nome), nome do filme + ano e o id do TMDB. Nunca é
+limpo quando o arquivo some, só ao desmarcar. Ao ler a biblioteca, arquivo sem
+progresso cujo equivalente já foi visto volta como assistido.
 
 **Debug.** A TV de loja não deixa ler logs nem abrir o Web Inspector pelo
 `sdb`. Por isso o app mostra o console na tela (tecla VERDE) e grava em

@@ -1266,6 +1266,7 @@ var ProgressStore = (function () {
             var o = parse(txt);
             if (o) { use(o, FILE_NAME); } else { tryBackup(true); }
         }, function () { tryBackup(false); });
+        loadWatchedFromDisk();
     }
 
     /* grava o conteudo inteiro num arquivo da biblioteca (cria se nao existir) */
@@ -1326,12 +1327,192 @@ var ProgressStore = (function () {
         if (urgent || Date.now() - lastDisk >= DISK_EVERY) { flush(); }
     }
 
+    /* ------------------------------------------------------------------
+     * assistidos.json - o "ja vi" que sobrevive ao arquivo.
+     * O progresso e por caminho: apagar um episodio e baixar de novo com
+     * outro nome (outro release, .mp4 -> .mkv) perdia o "assistido". Aqui
+     * cada episodio/filme visto fica por EQUIVALENCIA (serie + TxEy, nome
+     * do filme + ano, id do TMDB) e nunca sai quando o arquivo some - so ao
+     * desmarcar, que vira "done": false (senao a mescla com o localStorage
+     * ressuscitava). Ao ler a biblioteca, arquivo sem registro de progresso
+     * cujo equivalente ja foi visto volta como assistido (applyWatched).
+     * ------------------------------------------------------------------ */
+    var W_KEY = 'amorecoflix.watched.v1', W_FILE = 'assistidos.json', W_BAK = 'assistidos.bak.json';
+    var watched = loadWatched();        // id -> { done, name, updated }
+    var wReady = false, wWriting = false, wPending = false;
+
+    function loadWatched() {
+        try { return JSON.parse(localStorage.getItem(W_KEY)) || {}; }
+        catch (e) { return {}; }
+    }
+
+    /* "Ação & Cia." -> "acao cia" */
+    function normName(s) {
+        s = String(s || '').toLowerCase();
+        try { s = s.normalize('NFD').replace(/[̀-ͯ]/g, ''); } catch (e) {}
+        return s.replace(/[^a-z0-9]+/g, ' ').trim();
+    }
+
+    /* ids equivalentes de um arquivo (chave relativa a biblioteca):
+     *   "series:the vampire diaries:t1e5"  /  "tmdb:series:18165:t1e5"
+     *   "filmes:anaconda:2025"              /  "tmdb:filme:1234"
+     * Numeracao do biblioteca.json primeiro; sem ela, a do nome (S01E05). */
+    function watchIds(k) {
+        var parts = String(k).split('/'), ids = [];
+        if (k.charAt(0) === '/' || parts.length < 2) { return ids; }
+        var cat = parts[0].toLowerCase(), name = parts[parts.length - 1];
+        var tKey = parts[0] + '/' + parts[1];
+        var meta = window.Meta && Meta.ready();
+        function add(id) { if (id && ids.indexOf(id) === -1) { ids.push(id); } }
+
+        if (cat === 'filmes') {
+            var m = meta ? (parts.length === 2 ? Meta.title(tKey) : Meta.film(tKey, name)) : null;
+            var years = stripExt(name).match(/\b(19|20)\d{2}\b/g);
+            var t = normName(UI.cleanName(name));
+            if (t) { add('filmes:' + t + (years ? ':' + years[years.length - 1] : '')); }
+            if (m && m.tmdb) { add('tmdb:filme:' + m.tmdb); }
+            return ids;
+        }
+        if (parts.length < 3) { return ids; }
+        var show = cat + ':' + normName(parts[1]);
+        var tm = meta ? Meta.title(tKey) : null, fe = meta ? Meta.fileEp(tKey, name) : null;
+        var s, e;
+        if (fe) { s = fe[0]; e = fe[1]; }
+        else {
+            var i = UI.epInfo(name) || {};
+            s = i.s || (parts.length > 3 ? seasonNumber(parts[parts.length - 2]) : 0) || 1;
+            e = i.e;
+        }
+        if (e != null) {
+            add(show + ':t' + s + 'e' + e);
+            if (tm && tm.tmdb) { add('tmdb:' + cat + ':' + tm.tmdb + ':t' + s + 'e' + e); }
+        } else {
+            add(show + ':' + normName(UI.cleanName(name)));    // sem numero: pelo nome
+        }
+        return ids;
+    }
+
+    /* registro "assistido" equivalente a um arquivo (ou null) */
+    function watchedOf(k) {
+        var ids = watchIds(k);
+        for (var i = 0; i < ids.length; i++) {
+            var w = watched[ids[i]];
+            if (w && w.done) { return w; }
+        }
+        return null;
+    }
+
+    /* grava os ids do arquivo como vistos; true = mudou algo */
+    function addWatched(k, when) {
+        var changed = false;
+        watchIds(k).forEach(function (id) {
+            if (watched[id] && watched[id].done) { return; }
+            watched[id] = { done: true, name: baseName(k), updated: when || Date.now() };
+            changed = true;
+        });
+        return changed;
+    }
+    function markWatched(k) { if (addWatched(k)) { persistWatched(); } }
+    function unmarkWatched(k) {
+        var changed = false, now = Date.now();
+        watchIds(k).forEach(function (id) {
+            if (!watched[id] || !watched[id].done) { return; }
+            watched[id] = { done: false, name: baseName(k), updated: now };
+            changed = true;
+        });
+        if (changed) { persistWatched(); }
+    }
+
+    function persistWatched() {
+        try { localStorage.setItem(W_KEY, JSON.stringify(watched)); }
+        catch (e) { console.error('[Store] localStorage cheio (assistidos)?', e); }
+        writeWatched();
+    }
+    /* so depois de ler o do HD (senao apagaria o historico dele); arquivo
+       pequeno e que muda pouco: grava na hora, principal + .bak */
+    function writeWatched() {
+        if (!wReady || !libDir || !libDir.fullPath || !window.tizen) { return; }
+        if (wWriting) { wPending = true; return; }
+        wWriting = true;
+        var json = JSON.stringify(watched);
+        writeFile(W_FILE, json, function () {
+            writeFile(W_BAK, json, function () {
+                wWriting = false;
+                if (wPending) { wPending = false; writeWatched(); }
+            });
+        });
+    }
+
+    /* le o assistidos.json do HD e mescla com o local, id a id (o mais novo fica) */
+    function loadWatchedFromDisk() {
+        var base = libDir.fullPath + '/';
+        function parse(txt) {
+            try { var o = JSON.parse(txt); return (o && typeof o === 'object') ? o : null; }
+            catch (e) { return null; }
+        }
+        function use(disk) {
+            var changed = !disk, id;
+            disk = disk || {};
+            for (id in disk) {
+                if (!disk.hasOwnProperty(id) || !disk[id] || typeof disk[id] !== 'object') { continue; }
+                var l = watched[id], d = disk[id];
+                if (!l || (d.updated || 0) > (l.updated || 0)) { watched[id] = d; }
+                else if ((l.updated || 0) > (d.updated || 0)) { changed = true; }
+            }
+            for (id in watched) { if (watched.hasOwnProperty(id) && !disk[id]) { changed = true; } }
+            wReady = true;
+            try { localStorage.setItem(W_KEY, JSON.stringify(watched)); } catch (e) {}
+            console.log('[Store] assistidos: ' + Object.keys(watched).length + ' ids');
+            if (changed && Object.keys(watched).length) { writeWatched(); }
+            applyWatched();
+        }
+        function fromBak() {
+            readTextFile(base + W_BAK, function (t) { use(parse(t)); }, function () { use(null); });
+        }
+        readTextFile(base + W_FILE, function (txt) {
+            var o = parse(txt);
+            if (o) { use(o); } else { fromBak(); }
+        }, fromBak);
+    }
+
+    /** (1) todo registro "done" do progresso entra no assistidos (traz o
+        historico de antes deste arquivo existir); (2) arquivo da biblioteca
+        sem registro de progresso cujo equivalente ja foi visto ganha o
+        "assistido". Chamado ao ler o HD e quando a biblioteca/metadados mudam. */
+    function applyWatched(quiet) {
+        if (!wReady) { return 0; }
+        var k, changedW = false, added = 0;
+        for (k in cache) {
+            if (cache.hasOwnProperty(k) && cache[k] && cache[k].done && addWatched(k, cache[k].updated)) { changedW = true; }
+        }
+        if (changedW) { persistWatched(); }
+        if (!(window.Library && Library.scanned())) { return 0; }
+        Library.all().forEach(function (t) {
+            Library.episodes(t).forEach(function (ep) {
+                k = keyOf(ep.path);
+                if (cache[k]) { return; }
+                var w = watchedOf(k);
+                if (!w) { return; }
+                cache[k] = { path: k, name: baseName(k), dir: dirName(k), position: 0, duration: 0,
+                             done: true, updated: w.updated || Date.now() };
+                added++;
+            });
+        });
+        if (added) {
+            console.log('[Store] ' + added + ' arquivo(s) baixado(s) de novo ja tinham sido assistidos');
+            persist(true);
+            if (!quiet && window.Screens) { Screens.refresh('progress'); }
+        }
+        return added;
+    }
+
     /** Salva/atualiza o registro de um arquivo (rec.path = caminho completo). */
     function save(rec) {
         var k = keyOf(rec.path);
         rec.path = k;
         rec.dir  = dirName(k);
         cache[k] = rec;
+        if (rec.done) { markWatched(k); }
         persist(false);
     }
 
@@ -1343,6 +1524,7 @@ var ProgressStore = (function () {
     /** Marca como concluido e zera a posicao (para nao aparecer em "continuar"). */
     function markComplete(path) {
         var r = cache[keyOf(path)];
+        markWatched(keyOf(path));
         if (r) {
             r.done = true;
             r.position = 0;
@@ -1356,10 +1538,12 @@ var ProgressStore = (function () {
     function setDone(path, done) {
         var k = keyOf(path), r = cache[k];
         if (!done) {
+            unmarkWatched(k);
             if (r && r.done) { r.done = false; r.position = 0; r.updated = Date.now(); persist(true); }
             return;
         }
         if (!r) { r = cache[k] = { path: k, name: baseName(k), dir: dirName(k), position: 0, duration: 0 }; }
+        markWatched(k);
         r.done = true;
         r.position = 0;
         r.hidden = false;
@@ -1398,7 +1582,7 @@ var ProgressStore = (function () {
     return {
         save: save, get: get, markComplete: markComplete, setDone: setDone, hide: hide,
         continueList: continueList, remove: remove, clearAll: clearAll,
-        loadFromDisk: loadFromDisk, flush: flush
+        loadFromDisk: loadFromDisk, flush: flush, applyWatched: applyWatched
     };
 })();
 
@@ -1437,9 +1621,19 @@ function langName(code, fallback) {
  *    Assume nomenclatura tipo S01E01 / S01E02 e ordem alfabetica natural.
  * ==========================================================================*/
 
+/* Filme solto em Filmes/ (nem episodio, nem filme de colecao): a "playlist"
+ * dele e a pasta Filmes inteira, sem ordem de assistir - nao tem "proximo". */
+function isLooseFilm(fullPath) {
+    var parts = relPath(fullPath).split('/');
+    return parts.length === 2 && parts[0].toLowerCase() === 'filmes';
+}
+/* qualquer coisa dentro de Filmes/ (solto ou de colecao) */
+function isFilmPath(fullPath) { return relPath(fullPath).split('/')[0].toLowerCase() === 'filmes'; }
+
 /* Proximo arquivo da playlist (pasta do episodio atual). No ultimo episodio
  * da pasta, cai no 1o da proxima temporada, se findNextSeason() ja achou. */
 function findNextEpisode(currentPath) {
+    if (isLooseFilm(currentPath)) { return null; }
     var idx = App.playlist.findIndex(function (e) {
         return e.file.fullPath === currentPath;
     });

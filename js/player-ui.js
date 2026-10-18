@@ -28,7 +28,7 @@ var PlayerUI = (function () {
         btnEps: $('btn-episodes'), btnTracks: $('btn-tracks'), btnNext: $('btn-next'),
         center: $('p-center'), centerSvg: $('p-center-svg'),
         skip: $('skip-btn'), skipLabel: $('skip-label'), skipFill: $('skip-fill'), skipHint: $('skip-hint'),
-        next: $('next-card'), nextImg: $('next-img'), nextNum: $('next-num'), nextTitle: $('next-title'),
+        next: $('next-card'), nextKicker: document.querySelector('#next-card .next-kicker'),nextImg: $('next-img'), nextNum: $('next-num'), nextTitle: $('next-title'),
         nextSub: $('next-sub'), nextPlay: $('btn-next-play'), nextRing: $('next-ring'),
         nextRingFill: $('next-ring-fill'), nextSecs: $('next-secs'), nextHint: $('next-hint'),
         tracks: $('p-tracks'), setAudio: $('set-audio'), setText: $('set-text'),
@@ -110,7 +110,13 @@ var PlayerUI = (function () {
         }
         el.title.textContent = headTitle(entry, curInfo);
         reset();
-        el.btnEps.hidden = !(App.playlist && App.playlist.length > 1);
+        // filme solto: a playlist e a pasta Filmes inteira, nao uma lista de episodios
+        el.btnEps.hidden = isLooseFilm(entry.file.fullPath) || !(App.playlist && App.playlist.length > 1);
+        // filme de colecao: o "proximo" e o proximo filme dela
+        var film = isFilmPath(entry.file.fullPath);
+        pill(el.btnNext, 'next', film ? 'Próximo filme' : 'Próximo episódio', true);
+        el.nextKicker.textContent = film ? 'PRÓXIMO FILME' : 'PRÓXIMO EPISÓDIO';
+        el.next.setAttribute('aria-label', film ? 'Próximo filme' : 'Próximo episódio');
         refreshNextBtn();
         Screens.go('player');
         resetHud();
@@ -756,7 +762,6 @@ var PlayerUI = (function () {
         el.btnFwd.innerHTML = Icons.svg('fwd10', 36, 1.8);
         pill(el.btnEps, 'episodes', 'Episódios');
         pill(el.btnTracks, 'tracks', 'Áudio e legendas');
-        pill(el.btnNext, 'next', 'Próximo episódio', true);
         $('skip-ic').innerHTML = Icons.svg('skip', 30);
         $('next-play-ic').innerHTML = Icons.svg('play', 26);
         $('p-resume-start-ic').innerHTML = Icons.svg('restart', 26);

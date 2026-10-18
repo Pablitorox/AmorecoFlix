@@ -128,6 +128,8 @@ var Library = (function () {
 
     function changed(why) {
         if (why === 'meta') { remap(); }
+        // episodio baixado de novo (outro nome) que ja tinha sido visto volta assistido
+        if (why === 'scan' || why === 'meta') { ProgressStore.applyWatched(true); }
         listeners.forEach(function (fn) { try { fn(why); } catch (e) { console.error('[library] aviso:', e && e.message); } });
     }
 
