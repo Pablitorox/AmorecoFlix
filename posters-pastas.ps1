@@ -67,121 +67,35 @@ function Save-Cover($localTmpFile, $destName) {
     return (Test-Path -LiteralPath $out)
 }
 
-# abreviacoes / correcoes de nome p/ busca
-$ALIAS = @{
-    'fma brotherhood'        = 'Fullmetal Alchemist Brotherhood'
-    'fma'                    = 'Fullmetal Alchemist'
-    'hxh'                    = 'Hunter x Hunter'
-    'aot'                    = 'Attack on Titan'
-    'snk'                    = 'Attack on Titan'
-}
-# folder de FRANQUIA em Filmes -> nome(s) da colecao no TMDB
-$COLLECTION_ALIAS = @{
-    'jurassic park'    = @('Jurassic World', 'Jurassic Park')
-    'o bicho vai pegar'= @('Open Season', 'O Bicho Vai Pegar')
-    'vingadores'       = @('Vingadores', 'The Avengers')
-    'avatar'           = @('Avatar')
-}
-
-function Norm($s) {
-    $s = "$s".ToLower()
-    $s = $s -replace '(\d)\s*[\u00ba\u00aa\u00b0]','$1' -replace '[\u00ba\u00aa\u00b0]',''
-    $s = $s -replace '\b\d+\s*(a|\u00aa)?\s*temporada\b','' -replace '\bseason\s*\d+\b',''
-    $s = $s -replace '[:\-\u2013\u2014_.,]',' ' -replace '[^\p{Ll}\p{Nd} ]',''
-    ($s -replace '\s+',' ').Trim()
-}
-
-function WordOverlap($qn, $nm) {
-    $qw = @($qn -split ' ' | Where-Object { $_.Length -ge 2 })
-    $nw = @($nm -split ' ' | Where-Object { $_.Length -ge 2 })
-    if ($nw.Count -eq 0) { return 0 }
-    $common = ($nw | Where-Object { $qw -contains $_ }).Count
-    return [double]$common / $nw.Count      # fracao das palavras do resultado presentes na busca
-}
-
-function Get-ShowPoster($folderName) {
-    $base = ($folderName -replace '\s*[-\u2013]\s*\d+\s*(a|\u00aa)?\s*Temporada\s*$','' `
-                         -replace '\s*\d+\s*(a|\u00aa)?\s*Temporada\s*$','').Trim()
-    $key  = Norm $base
-    $queries = @()
-    if ($ALIAS.ContainsKey($key)) { $queries += $ALIAS[$key] }
-    $queries += $base
-    $queries += ($base -replace '\s+\d+\s*$','')            # sem numero final
-    $queries = $queries | Where-Object { $_ -and $_.Trim().Length -ge 2 } | Select-Object -Unique
-
-    $best = $null; $bestScore = -1e9
-    foreach ($q in $queries) {
-        $qn = Norm $q
-        $url = "https://api.themoviedb.org/3/search/tv?api_key=$ApiKey&language=pt-BR&query=" + [uri]::EscapeDataString($q)
-        try { $r = Invoke-RestMethod $url -TimeoutSec 20 } catch { continue }
-        foreach ($h in ($r.results | Select-Object -First 6)) {
-            if (-not $h.poster_path) { continue }
-            $hn = $h.name; if (-not $hn) { $hn = '' }
-            $ho = $h.original_name; if (-not $ho) { $ho = '' }
-            $ov = [Math]::Max((WordOverlap $qn (Norm $hn)), (WordOverlap $qn (Norm $ho)))
-            $sc = ($ov * 4000) + [double]$h.popularity
-            if ((Norm $hn) -eq $qn -or (Norm $ho) -eq $qn) { $sc += 3000 }
-            if ($sc -gt $bestScore) { $bestScore = $sc; $best = $h; $bestOv = $ov }
-        }
-        if ($best -and $bestOv -ge 0.8) { break }
-        Start-Sleep -Milliseconds 150
-    }
-    if ($best -and $bestOv -ge 0.34) { return $best }
-    return $null
-}
+# capa da serie/anime: busca de TV do lib.ps1 (apelidos de pasta em $TmdbAlias)
+function Get-ShowPoster($folderName) { Find-TmdbTv $folderName -NeedPoster }
 
 $PosterCache = @{}
 function Fetch-Poster($posterPath) {
     if ($PosterCache.ContainsKey($posterPath)) { return $PosterCache[$posterPath] }
     $tmp = Join-Path $env:TEMP ("pp_" + [guid]::NewGuid().ToString('N') + '.jpg')
-    $got = $false
-    foreach ($n in 1..3) {
-        try { Invoke-WebRequest "https://image.tmdb.org/t/p/w500$posterPath" -OutFile $tmp -TimeoutSec 40; $got = $true; break }
-        catch { Start-Sleep -Seconds 2 }
-    }
-    if (-not $got) { return $null }
+    if (-not (Save-TmdbImage $posterPath 'w500' $tmp)) { return $null }
     $PosterCache[$posterPath] = $tmp
     return $tmp
 }
 
-# tira palavras de "colecao" p/ comparar so o nome da franquia
-function NormColl($s) {
-    (Norm $s) -replace '\b(colecao|collection|saga|trilogia|duologia|pentalogia|filmes|the movies?)\b','' -replace '\s+',' '
-}
-
-function Search-Kind($kind, $q) {
-    $url = "https://api.themoviedb.org/3/search/$kind`?api_key=$ApiKey&language=pt-BR&query=" + [uri]::EscapeDataString($q)
-    try { return (Invoke-RestMethod $url -TimeoutSec 20).results } catch { return @() }
-}
-
 # capa da COLECAO/franquia (Filmes) - colecao primeiro, senao o 1o filme
 function Get-CollectionPoster($folderName) {
-    $key = Norm $folderName
-    $names = @($folderName)
-    if ($COLLECTION_ALIAS.ContainsKey($key)) { $names = $COLLECTION_ALIAS[$key] }
-
-    # 1) COLECOES
-    $best = $null; $bestOv = 0
-    foreach ($q in $names) {
-        $qn = Norm $q
-        foreach ($h in (Search-Kind 'collection' $q | Select-Object -First 8)) {
-            if (-not $h.poster_path) { continue }
-            $ov = [Math]::Max((WordOverlap $qn (NormColl $h.name)),
-                              (WordOverlap $qn (NormColl $h.original_name)))
-            if ($ov -gt $bestOv) { $bestOv = $ov; $best = $h }
-        }
-        Start-Sleep -Milliseconds 150
-        if ($bestOv -ge 0.85) { break }
-    }
-    if ($best -and $bestOv -ge 0.5) { return $best }
+    # 1) COLECOES (apelidos de pasta em $TmdbCollectionAlias)
+    $hit = Find-TmdbCollection $folderName -NeedPoster
+    if ($hit) { return $hit }
 
     # 2) fallback: 1o filme da franquia
+    $key = Norm-Title $folderName
+    $names = @($folderName)
+    if ($script:TmdbCollectionAlias.ContainsKey($key)) { $names = $script:TmdbCollectionAlias[$key] }
     $best = $null; $bestOv = 0
     foreach ($q in $names) {
-        $qn = Norm $q
-        foreach ($h in (Search-Kind 'movie' $q | Select-Object -First 6)) {
+        $qn = Norm-Title $q
+        $r = Invoke-Tmdb '/search/movie' ('&query=' + [uri]::EscapeDataString($q))
+        foreach ($h in ($r.results | Select-Object -First 6)) {
             if (-not $h.poster_path) { continue }
-            $ov = [Math]::Max((WordOverlap $qn (Norm $h.title)), (WordOverlap $qn (Norm $h.original_title)))
+            $ov = [Math]::Max((Get-WordOverlap $qn (Norm-Title $h.title)), (Get-WordOverlap $qn (Norm-Title $h.original_title)))
             if ($ov -gt $bestOv) { $bestOv = $ov; $best = $h }
         }
         Start-Sleep -Milliseconds 150

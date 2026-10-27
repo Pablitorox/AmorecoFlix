@@ -652,7 +652,14 @@ Liste em "itens" SO os que tem problema (use o "id" recebido). Se esta tudo cert
 }
 
 # ---------- copia ----------
+# caminho com mais de 260 caracteres (pasta de torrent dentro de Downloads): sem o
+# LongPathsEnabled do Windows, o PowerShell 5.1 so abre com o prefixo \\?\ (o ffprobe abre sozinho)
+function Long-Path($p) {
+    if ($p.Length -ge 248 -and -not $p.StartsWith('\\')) { return '\\?\' + $p }
+    return $p
+}
 function Copy-Part($src, $part) {
+    $src = Long-Path $src; $part = Long-Path $part
     $total = (Get-Item -LiteralPath $src).Length
     $in = [IO.File]::Open($src, 'Open', 'Read', 'ReadWrite')
     try {
@@ -661,7 +668,8 @@ function Copy-Part($src, $part) {
             $buf = New-Object byte[] (4MB); $done = 0; $tick = 0
             while (($n = $in.Read($buf, 0, $buf.Length)) -gt 0) {
                 $out.Write($buf, 0, $n); $done += $n
-                if ((++$tick) % 4 -eq 0) { $prog.Value = [int](1000 * $done / [Math]::Max(1, $total)); Pump }
+                # [long]1: com o 1 inteiro o Max escolhe a versao Int32 e estoura em arquivo > 2 GB
+                if ((++$tick) % 4 -eq 0) { $prog.Value = [int](1000 * $done / [Math]::Max([long]1, $total)); Pump }
             }
         } finally { $out.Close() }
     } finally { $in.Close() }

@@ -90,8 +90,8 @@ function Save-Cover($localTmpFile, $destName) {
     return (Test-Path -LiteralPath $out)
 }
 
-# ids TMDB conhecidos (chave no formato Norm: minusculo, sem hifen/acento).
-# Evita erro de busca; nome nao listado cai na busca por popularidade.
+# ids TMDB conhecidos (chave no formato Norm-Title do lib.ps1: minusculo, sem hifen).
+# Evita erro de busca; nome nao listado cai na busca de TV do lib.ps1.
 $KNOWN_IDS = @{
     'the vampire diaries'       = 18165
     'the originals'             = 46896
@@ -128,22 +128,11 @@ function SeasonNum($name) {
     return 0
 }
 
-function Norm($s) {
-    $s = "$s".ToLower() -replace '(\d)\s*[' + [char]0x00BA + [char]0x00AA + [char]0x00B0 + ']', '$1'
-    $s = $s -replace '\b\d+\s*(a|' + [char]0x00AA + ')?\s*temporada\b', '' -replace '\bseason\s*\d+\b', ''
-    $s = $s -replace '[:\-' + [char]0x2013 + [char]0x2014 + '_.,]', ' ' -replace '[^a-z0-9 ]', ''
-    ($s -replace '\s+', ' ').Trim()
-}
-
 function Get-TvId($showName) {
-    $key = Norm $showName
+    $key = Norm-Title $showName
     if ($KNOWN_IDS.ContainsKey($key)) { return $KNOWN_IDS[$key] }
-    $url = "https://api.themoviedb.org/3/search/tv?api_key=$ApiKey&language=pt-BR&query=" + [uri]::EscapeDataString($showName)
-    try {
-        $r = Invoke-RestMethod $url -TimeoutSec 20
-        $hit = $r.results | Sort-Object -Property @{e={ [double]$_.popularity }} -Descending | Select-Object -First 1
-        if ($hit) { return [int]$hit.id }
-    } catch {}
+    $hit = Find-TmdbTv $showName
+    if ($hit) { return [int]$hit.id }
     return 0
 }
 
@@ -152,20 +141,15 @@ function Fetch-Poster($path) {
     if (-not $path) { return $null }
     if ($posterCache.ContainsKey($path)) { return $posterCache[$path] }
     $tmp = Join-Path $env:TEMP ('ct_' + [guid]::NewGuid().ToString('N') + '.jpg')
-    foreach ($n in 1..3) {
-        try { Invoke-WebRequest "https://image.tmdb.org/t/p/w500$path" -OutFile $tmp -TimeoutSec 40; break }
-        catch { Start-Sleep -Seconds 2 }
-    }
-    if (Test-Path $tmp) { $posterCache[$path] = $tmp; return $tmp }
-    return $null
+    if (-not (Save-TmdbImage $path 'w500' $tmp)) { return $null }
+    $posterCache[$path] = $tmp
+    return $tmp
 }
 
 # poster da temporada (arte limpa: sem language); fallback pt-BR; fallback serie
 function Season-PosterPath($tvId, $season, $showPoster) {
     foreach ($lang in @('en-US', '', 'pt-BR')) {
-        $q = "https://api.themoviedb.org/3/tv/$tvId/season/$season`?api_key=$ApiKey"
-        if ($lang) { $q += "&language=$lang" }
-        try { $s = Invoke-RestMethod $q -TimeoutSec 20 } catch { continue }
+        $s = Invoke-Tmdb "/tv/$tvId/season/$season" '' $lang
         if ($s.poster_path) { return $s.poster_path }
     }
     return $showPoster
@@ -199,8 +183,7 @@ foreach ($cat in 'Series', 'Animes') {
 
         $tvId = Get-TvId $showDir.Name
         if (-not $tvId) { Write-Host "  ? sem TMDB id: $($showDir.Name)" -ForegroundColor Yellow; $miss += $seasons.Count; continue }
-        $showPoster = $null
-        try { $showPoster = (Invoke-RestMethod "https://api.themoviedb.org/3/tv/$tvId`?api_key=$ApiKey&language=pt-BR" -TimeoutSec 20).poster_path } catch {}
+        $showPoster = (Invoke-Tmdb "/tv/$tvId").poster_path
 
         Write-Host "== $($showDir.Name)  (tv $tvId) ==" -ForegroundColor Cyan
         foreach ($seas in $seasons) {

@@ -7,10 +7,12 @@
   Find-FfTool nome    -> caminho do ffmpeg/ffprobe (PATH ou instalacao do winget Gyan.FFmpeg)
 
   TMDB (usam a variavel $ApiKey do script que chamou):
-  Invoke-Tmdb '/tv/123' ['&extra=1']   -> resposta em pt-BR (3 tentativas) ou $null
+  Invoke-Tmdb '/tv/123' ['&extra=1'] ['en-US'|'']  -> resposta em pt-BR (3 tentativas) ou $null;
+                                          '' = sem language (arte limpa nas imagens)
   Find-TmdbTv 'Nome da pasta'          -> resultado de /search/tv (serie/anime) ou $null
   Find-TmdbMovie 'arquivo.mkv'         -> resultado de /search/movie pelo titulo+ano do nome
   Find-TmdbCollection 'Pasta'          -> resultado de /search/collection ou $null
+  (as tres buscas aceitam -NeedPoster: ignora resultado sem poster - scripts de capa)
   Get-SeasonEpisode 'arquivo' 'pasta'  -> @{ S=n; E=n } (S01E02, 1x02, Episodio 2, "02 Titulo")
   Save-TmdbImage '/caminho.jpg' 'w1280' 'C:\saida.jpg'
 
@@ -46,8 +48,8 @@ function Find-FfTool([string]$name) {
 
 
 # ============================== TMDB ==============================
-# Buscas que ja funcionavam em posters-pastas.ps1 / posters-filmes.ps1,
-# reunidas aqui para o metadados.ps1 (e para quem mais precisar).
+# Buscas usadas pelo metadados.ps1 e pelos scripts de capa
+# (posters-pastas.ps1, posters-filmes.ps1, capas-temporada.ps1).
 
 # abreviacoes de pasta -> nome para a busca
 $script:TmdbAlias = @{
@@ -85,7 +87,9 @@ function Get-WordOverlap($qn, $nm) {
 
 function Invoke-Tmdb([string]$path, [string]$extra = '', [string]$lang = 'pt-BR') {
     $sep = if ($path.Contains('?')) { '&' } else { '?' }
-    $url = "https://api.themoviedb.org/3$path$sep" + "api_key=$ApiKey&language=$lang$extra"
+    $url = "https://api.themoviedb.org/3$path$sep" + "api_key=$ApiKey"
+    if ($lang) { $url += "&language=$lang" }
+    $url += $extra
     foreach ($n in 1..3) {
         try { return Invoke-RestMethod $url -TimeoutSec 25 }
         catch {
@@ -96,7 +100,7 @@ function Invoke-Tmdb([string]$path, [string]$extra = '', [string]$lang = 'pt-BR'
     return $null
 }
 
-function Find-TmdbTv([string]$folderName) {
+function Find-TmdbTv([string]$folderName, [switch]$NeedPoster) {
     $base = ($folderName -replace '\s*[-\u2013]\s*\d+\s*(a|\u00aa)?\s*Temporada\s*$','' `
                          -replace '\s*\d+\s*(a|\u00aa)?\s*Temporada\s*$','').Trim()
     $key = Norm-Title $base
@@ -111,6 +115,7 @@ function Find-TmdbTv([string]$folderName) {
         $qn = Norm-Title $q
         $r = Invoke-Tmdb '/search/tv' ('&query=' + [uri]::EscapeDataString($q))
         foreach ($h in ($r.results | Select-Object -First 6)) {
+            if ($NeedPoster -and -not $h.poster_path) { continue }
             $hn = "$($h.name)"; $ho = "$($h.original_name)"
             $ov = [Math]::Max((Get-WordOverlap $qn (Norm-Title $hn)), (Get-WordOverlap $qn (Norm-Title $ho)))
             $sc = ($ov * 4000) + [double]$h.popularity
@@ -134,7 +139,7 @@ function Get-TitleYear([string]$name) {
     return [pscustomobject]@{ Title = $t; Year = $year }
 }
 
-function Find-TmdbMovie([string]$fileName) {
+function Find-TmdbMovie([string]$fileName, [switch]$NeedPoster) {
     $ty = Get-TitleYear $fileName
     $title = $ty.Title; $year = $ty.Year
     $queries = @($title, ($title -replace '\s+(\d+)\s*[-\u2013:]\s*','$1 '), ($title -replace '\s+\d+\s*[-\u2013:]\s*',' '),
@@ -145,6 +150,7 @@ function Find-TmdbMovie([string]$fileName) {
         $qn = Norm-Title $cand
         $r = Invoke-Tmdb '/search/movie' ('&include_adult=false&query=' + [uri]::EscapeDataString($cand))
         foreach ($h in ($r.results | Select-Object -First 6)) {
+            if ($NeedPoster -and -not $h.poster_path) { continue }
             $s = [double]$h.popularity
             $tn = Norm-Title $h.title; $on = Norm-Title $h.original_title
             if ($tn -eq $qn -or $on -eq $qn) { $s += 5000 }
@@ -163,7 +169,7 @@ function Find-TmdbMovie([string]$fileName) {
     return $null
 }
 
-function Find-TmdbCollection([string]$folderName) {
+function Find-TmdbCollection([string]$folderName, [switch]$NeedPoster) {
     $key = Norm-Title $folderName
     $names = @($folderName)
     if ($script:TmdbCollectionAlias.ContainsKey($key)) { $names = $script:TmdbCollectionAlias[$key] }
@@ -172,6 +178,7 @@ function Find-TmdbCollection([string]$folderName) {
         $qn = Norm-Title $q
         $r = Invoke-Tmdb '/search/collection' ('&query=' + [uri]::EscapeDataString($q))
         foreach ($h in ($r.results | Select-Object -First 8)) {
+            if ($NeedPoster -and -not $h.poster_path) { continue }
             $a = ((Norm-Title $h.name) -replace '\b(colecao|collection|saga|trilogia|duologia|pentalogia|filmes|the movies?)\b','' -replace '\s+',' ').Trim()
             $b = ((Norm-Title $h.original_name) -replace '\b(colecao|collection|saga|trilogia|duologia|pentalogia|filmes|the movies?)\b','' -replace '\s+',' ').Trim()
             $ov = [Math]::Max((Get-WordOverlap $qn $a), (Get-WordOverlap $qn $b))
