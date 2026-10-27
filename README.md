@@ -127,7 +127,7 @@ git e do pacote da TV.
 
 | Script | Para que serve |
 |--------|----------------|
-| `Importador.bat` / `importador.ps1` | Janela para passar episódios de Downloads para o HD: análise, cópia verificada, legendas, miniaturas, metadados e revisão opcional por IA (Gemini ou Claude). |
+| `Importador.bat` / `importador.ps1` | Janela para passar episódios e filmes de Downloads para o HD: análise, cópia verificada, legendas, miniaturas, metadados e revisão opcional por IA (Gemini ou Claude). Filmes de uma franquia vão para a pasta da coleção (a que já existe, ou uma nova quando vêm 2 ou mais juntos). |
 | `import-serie.ps1` | O mesmo fluxo, por linha de comando. |
 | `metadados.ps1` | Sinopse, ano, gêneros, nota, títulos dos episódios e artes do TMDB em `meta/`. Incremental; `-Only "Série"` refaz um título, `-Force` refaz tudo; correções manuais em `meta/ids.json`. |
 | `checar-compatibilidade.ps1` | Arquivo corrompido, truncado ou com codec de risco para a TV (ffprobe/ffmpeg). |

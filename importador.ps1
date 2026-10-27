@@ -20,7 +20,9 @@
   FILMES: arquivo sem SxxEyy (e sem temporada no nome da pasta) mas com ano no
   nome ("Titulo.2024.1080p...") e tratado como filme: titulo oficial pt-BR do
   TMDB, vai p/ Filmes\"Titulo (Ano) [1080p].ext" (ou p/ a pasta de colecao onde
-  ja houver uma versao dele), poster do TMDB como miniatura.
+  ja houver uma versao dele), poster do TMDB como miniatura. Filme de franquia
+  (colecao no TMDB) vai p/ a pasta dela (Filmes\Jogos Vorazes\...) se ela ja
+  existir ou se o lote trouxer 2+ filmes da colecao; sozinho, fica solto.
 
   LOG: tudo que aparece na janela (e erros com a pilha) vai p/
   logs\importador-AAAA-MM-DD.log - botao "Abrir log".
@@ -62,6 +64,9 @@ $script:tvId = $TvId   # e a MESMA variavel do parametro -TvId (PowerShell ignor
 $script:busy = $false
 $script:seasonCache = @{}
 $script:sibCache = @{}
+$script:movieCache = @{}   # caminho -> detalhes do filme no TMDB (Movie-Info)
+$script:collBatch = @{}    # id da colecao -> filmes dela no lote (Collection-Dir)
+$script:libColl = @{}      # id da colecao -> pasta que ja existe em Filmes\
 $script:showText = $ShowName
 
 # ---------- UI ----------
@@ -249,11 +254,53 @@ function Tmdb-Movie($title, $year) {
         return (Invoke-RestMethod -Uri ('https://api.themoviedb.org/3/movie/{0}?api_key={1}&language=pt-BR' -f $hit.id, $tmdbKey) -TimeoutSec 15)
     } catch { Log "TMDB (filme): $($_.Exception.Message)"; return $null }
 }
+# detalhes do filme no TMDB (com belongs_to_collection): uma consulta por arquivo
+function Movie-Info($it) {
+    if (-not $script:movieCache.ContainsKey($it.Path)) { $script:movieCache[$it.Path] = Tmdb-Movie $it.MTitle $it.MYear }
+    return $script:movieCache[$it.Path]
+}
+# "Jogos Vorazes: Colecao" -> "Jogos Vorazes" (mesma limpeza do metadados.ps1)
+function Collection-Name($s) {
+    ("$s" -replace '\s*[-:\u2013]?\s*(Cole\u00e7\u00e3o|Collection)\s*$', '' `
+          -replace '^\s*(Cole\u00e7\u00e3o|Collection)\s*[-:\u2013]?\s*', '').Trim()
+}
+# pastas de colecao que ja existem, pelo id do TMDB gravado no meta\biblioteca.json
+function Load-LibCollections {
+    $script:libColl = @{}
+    $bj = Join-Path $HdRoot 'meta\biblioteca.json'
+    if (-not (Test-Path -LiteralPath $bj)) { return }
+    try {
+        $tit = ([IO.File]::ReadAllText($bj, [Text.Encoding]::UTF8) | ConvertFrom-Json).titulos
+        foreach ($p in $tit.PSObject.Properties) {
+            if ($p.Value.tipo -ne 'colecao' -or -not $p.Value.tmdb) { continue }
+            $d = Join-Path $HdRoot ($p.Name -replace '/', '\')
+            if (Test-Path -LiteralPath $d) { $script:libColl["$($p.Value.tmdb)"] = $d }
+        }
+    } catch { Log "AVISO: meta\biblioteca.json ilegivel ($($_.Exception.Message))" }
+}
+# filme de franquia vai p/ a pasta da colecao, como Vingadores\: a que ja existe (id no
+# biblioteca.json ou mesmo nome) ou, com 2+ filmes dela no lote, uma nova com o nome da
+# colecao. Filme sozinho de uma franquia fica solto (sem pasta de um filme so).
+function Collection-Dir($it, $fd) {
+    $c = $null; if ($it.Movie) { $c = $it.Movie.belongs_to_collection }
+    if (-not $c) { return $null }
+    $name = Collection-Name $c.name
+    $dir = $script:libColl["$($c.id)"]
+    if (-not $dir -and (Test-Path -LiteralPath $fd)) {
+        $dir = Get-ChildItem -LiteralPath $fd -Directory -EA 0 | Where-Object { (Norm $_.Name) -eq (Norm $name) } |
+            Select-Object -First 1 -ExpandProperty FullName
+    }
+    if ($dir) { Log "    colecao: $name -> pasta $(Split-Path $dir -Leaf)"; return $dir }
+    $n = 0; if ($script:collBatch.ContainsKey("$($c.id)")) { $n = $script:collBatch["$($c.id)"].Count }
+    if ($n -ge 2) { $dir = Join-Path $fd (Safe-FileName $name); Log "    colecao: $name -> pasta nova ($n filmes no lote)"; return $dir }
+    Log "    colecao: $name - unico filme dela no lote, fica solto em Filmes"
+    return $null
+}
 # filme: titulo/ano oficiais (TMDB pt-BR), destino em Filmes\ e versoes ja existentes
 # (procura em Filmes\ inteiro, inclusive pastas de colecao - a nova fica na mesma pasta)
 function Set-MovieDest($it) {
     $guess = $it.MTitle
-    $m = Tmdb-Movie $it.MTitle $it.MYear
+    $m = Movie-Info $it
     $it.Movie = $m
     if ($m) {
         if ($m.title) { $it.MTitle = $m.title }
@@ -271,7 +318,9 @@ function Set-MovieDest($it) {
     }
     $tag = Res-Label $it.Info.W $it.Info.H
     $tag = if ($tag -in @('4K', '1080p', '720p')) { " [$tag]" } else { '' }
-    $dir = if ($it.Existing.Count) { $it.Existing[0].DirectoryName } else { $fd }
+    $dir = $fd
+    if ($it.Existing.Count) { $dir = $it.Existing[0].DirectoryName }
+    else { $cd = Collection-Dir $it $fd; if ($cd) { $dir = $cd } }
     $it.Dst = Join-Path $dir ((Safe-FileName $it.MTitle) + " ($($it.MYear))$tag" + [IO.Path]::GetExtension($it.Path).ToLower())
 }
 function Get-SeasonInfo($season) {
@@ -407,6 +456,16 @@ function Analyze-All($show) {
     $script:sibCache = @{}
     Log "--- Analise: $(if ($show) { "$show (TMDB $($script:tvId))" } else { 'so filmes' }) ---"
     if (-not $ffprobe) { Log 'AVISO: ffprobe nao encontrado - analise limitada.' }
+    # filmes de cada colecao no lote, antes do resto: a pasta de um depende dos outros
+    $script:collBatch = @{}
+    foreach ($it in @($script:items | Where-Object { $_.Kind -eq 'movie' })) {
+        $m = Movie-Info $it
+        if (-not ($m -and $m.belongs_to_collection)) { continue }
+        $cid = "$($m.belongs_to_collection.id)"
+        if (-not $script:collBatch.ContainsKey($cid)) { $script:collBatch[$cid] = @{} }
+        $script:collBatch[$cid]["$($m.id)"] = $true
+    }
+    if ($script:collBatch.Count) { Load-LibCollections }
     $n = 0
     foreach ($it in $script:items) {
         $it.Status = 'OK'; $it.Notes.Clear(); $it.Action = 'copy'; $it.SkipReason = ''; $it.Existing = @()
@@ -726,6 +785,19 @@ function Make-MoviePoster($dstPath, $movie) {
     return (Test-Path -LiteralPath $out)
 }
 
+# capa da pasta de colecao (poster limpo da colecao, como o posters-pastas.ps1), se ainda nao tem
+function Make-CollectionCover($dstPath, $movie) {
+    $pd = Split-Path $dstPath -Parent
+    if ($pd.TrimEnd('\') -ieq (Join-Path $HdRoot 'Filmes').TrimEnd('\')) { return }
+    $c = $null; if ($movie) { $c = $movie.belongs_to_collection }
+    if (-not $c -or -not $c.poster_path) { return }
+    $thumbs = Join-Path $HdRoot 'thumbs'
+    $out = Join-Path $thumbs ((Split-Path $pd -Leaf) + '.jpg')
+    if (Test-Path -LiteralPath $out) { return }
+    New-Item -ItemType Directory -Force -Path $thumbs | Out-Null
+    if (Save-TmdbImage $c.poster_path 'w500' $out) { Log '    capa da colecao criada' } else { Log '    capa da colecao falhou' }
+}
+
 function Make-SeriesCover($show) {
     if ($script:tvId -le 0 -or -not $tmdbKey -or -not $ffmpeg) { return }
     $out = Join-Path (Join-Path $HdRoot 'thumbs') "$show.jpg"
@@ -904,6 +976,7 @@ function Do-Import {
                 $pd = Split-Path $it.Dst -Parent
                 $movieKeys += $(if ($pd.TrimEnd('\') -ieq (Join-Path $HdRoot 'Filmes').TrimEnd('\')) { [IO.Path]::GetFileNameWithoutExtension($it.Dst) } else { Split-Path $pd -Leaf })
                 if (Make-MoviePoster $it.Dst $it.Movie) { Log '    poster OK' } else { Make-Thumb $it.Dst 0 0 $false }
+                Make-CollectionCover $it.Dst $it.Movie
             } else {
                 $okEps++
                 Make-Thumb $it.Dst $it.Season $it.Ep (-not $flat)
@@ -922,7 +995,8 @@ function Do-Import {
         # sinopse, titulos dos episodios e fundo 16:9 para o app (meta\biblioteca.json)
         $metaPs = Join-Path $PSScriptRoot 'metadados.ps1'
         # -Only e comparado com -like no metadados.ps1: escapa o "[1080p]" do nome do filme
-        $metaTargets = @($movieKeys | ForEach-Object { [Management.Automation.WildcardPattern]::Escape($_) })
+        # (filmes da mesma colecao dao a mesma pasta: uma vez so)
+        $metaTargets = @($movieKeys | Select-Object -Unique | ForEach-Object { [Management.Automation.WildcardPattern]::Escape($_) })
         if ($okEps -and $show) { $metaTargets += $show }
         if ($metaTargets.Count -and $tmdbKey -and (Test-Path -LiteralPath $metaPs)) {
             Log 'Atualizando metadados (TMDB)...'
@@ -954,7 +1028,7 @@ if (-not $Headless) {
         $fd.Filter = 'Videos|*.mkv;*.mp4;*.avi;*.m4v;*.ts|Todos|*.*'
         if ($fd.ShowDialog() -eq 'OK') { Run-Safe 'escolher arquivos' { Log "Arquivos escolhidos: $($fd.FileNames -join ' | ')"; Add-Paths $fd.FileNames } }
     })
-    $btnLimpa.Add_Click({ Log 'Lista limpa.'; $script:items.Clear(); Refresh-List; $cmbSerie.Text = ''; $lblTv.Text = ''; $script:tvId = 0; $script:seasonCache = @{} })
+    $btnLimpa.Add_Click({ Log 'Lista limpa.'; $script:items.Clear(); Refresh-List; $cmbSerie.Text = ''; $lblTv.Text = ''; $script:tvId = 0; $script:seasonCache = @{}; $script:movieCache = @{} })
     $btnLogs.Add_Click({
         if (-not (Test-Path -LiteralPath $LogDir)) { New-Item -ItemType Directory -Force -Path $LogDir | Out-Null }
         if (Test-Path -LiteralPath $script:logFile) { Start-Process explorer.exe "/select,`"$($script:logFile)`"" } else { Start-Process explorer.exe "`"$LogDir`"" }
