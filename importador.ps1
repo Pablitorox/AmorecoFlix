@@ -50,6 +50,7 @@ $RANK = @{ 'OK' = 0; 'ATENCAO' = 1; 'BLOQUEIO' = 2 }
 
 . (Join-Path $PSScriptRoot 'lib.ps1')
 $tmdbKey = Get-TmdbApiKey
+$ApiKey = $tmdbKey   # as buscas do lib.ps1 (Invoke-Tmdb) leem $ApiKey
 $anthropicKey = Get-EnvValue 'ANTHROPIC_API_KEY'
 $geminiKey = Get-EnvValue 'GEMINI_API_KEY'     # alternativa gratuita (Google AI Studio)
 $aiName = if ($anthropicKey) { 'Claude' } elseif ($geminiKey) { 'Gemini' } else { '' }
@@ -767,20 +768,26 @@ function Make-Thumb($dstPath, $season, $ep, $preferStill) {
     if (Test-Path -LiteralPath $out) { Log '    miniatura OK' } else { Log '    miniatura falhou' }
 }
 
-# filme: poster oficial (TMDB) num quadro 16:9 com fundo desfocado - mesmo visual do posters-filmes.ps1
+# filme: arte 16:9 do TMDB com o nome do filme; sem ela, poster oficial num quadro
+# 16:9 com fundo desfocado - mesmo visual do posters-filmes.ps1
 function Make-MoviePoster($dstPath, $movie) {
     if (-not $ffmpeg -or -not $movie -or -not $movie.poster_path) { return $false }
     $thumbs = Join-Path $HdRoot 'thumbs'
     New-Item -ItemType Directory -Force -Path $thumbs | Out-Null
     $out = Join-Path $thumbs ((Split-Path $dstPath -Leaf) + '.jpg')
     if (Test-Path -LiteralPath $out) { Remove-Item -LiteralPath $out -Force }
-    $fc = '[0:v]scale=854:480:force_original_aspect_ratio=increase,crop=854:480,boxblur=24:4,eq=brightness=-0.12[bg];' +
-          '[0:v]scale=-1:480:force_original_aspect_ratio=decrease[fg];[bg][fg]overlay=(W-w)/2:0'
     $tmp = Join-Path $env:TEMP ('poster_' + [guid]::NewGuid().ToString('N') + '.jpg')
-    try {
-        Invoke-WebRequest "https://image.tmdb.org/t/p/w500$($movie.poster_path)" -OutFile $tmp -TimeoutSec 30
-        & $ffmpeg -y -i $tmp -filter_complex $fc -frames:v 1 -q:v 3 -- $out 2>$null
-    } catch { Log "    poster falhou: $($_.Exception.Message)" }
+    $bd = Get-TmdbTitleBackdrop $movie.id
+    if ($bd -and (Save-TmdbImage $bd 'w780' $tmp)) {
+        & $ffmpeg -y -i $tmp -vf 'scale=854:480:force_original_aspect_ratio=increase,crop=854:480' -frames:v 1 -q:v 3 -- $out 2>$null
+    } else {
+        $fc = '[0:v]scale=854:480:force_original_aspect_ratio=increase,crop=854:480,boxblur=24:4,eq=brightness=-0.12[bg];' +
+              '[0:v]scale=-1:480:force_original_aspect_ratio=decrease[fg];[bg][fg]overlay=(W-w)/2:0'
+        try {
+            Invoke-WebRequest "https://image.tmdb.org/t/p/w500$($movie.poster_path)" -OutFile $tmp -TimeoutSec 30
+            & $ffmpeg -y -i $tmp -filter_complex $fc -frames:v 1 -q:v 3 -- $out 2>$null
+        } catch { Log "    poster falhou: $($_.Exception.Message)" }
+    }
     if (Test-Path -LiteralPath $tmp) { [IO.File]::Delete($tmp) }
     return (Test-Path -LiteralPath $out)
 }

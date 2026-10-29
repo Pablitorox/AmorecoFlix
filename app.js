@@ -2431,12 +2431,18 @@ function findExtSubs(videoName) {
 function openVideoByPath(fullPath, resumeMs) {
     // card desenhado antes do HD ser achado tem o caminho relativo a biblioteca
     if (fullPath && fullPath.charAt(0) !== '/') { fullPath = libFull(fullPath); }
+    // colecao: "proximo filme" na ordem de lancamento, igual a pagina dela
+    var title = Library.ofPath(fullPath);
+    function inOrder(list) {
+        if (title && title.kind === 'colecao') { list.sort(Library.releaseOrder(title.key)); }
+        return list;
+    }
     // tenta achar na playlist atual; senao resolve direto pelo caminho
     var dirVideos = App.dirFiles.filter(function (e) { return !e.isDir; });
     var inList = dirVideos.filter(function (e) {
         return e.file.fullPath === fullPath;
     })[0];
-    if (inList) { App.playlist = dirVideos; openVideo(inList, resumeMs); return; }
+    if (inList) { App.playlist = inOrder(dirVideos); openVideo(inList, resumeMs); return; }
 
     tizen.filesystem.resolve('file://' + fullPath, function (file) {
         var pseudo = { file: file, name: file.name, isDir: false };
@@ -2447,7 +2453,7 @@ function openVideoByPath(fullPath, resumeMs) {
         try { parent = file.parent; } catch (e) {}
         if (!parent) { openVideo(pseudo, resumeMs); return; }
         listDirectory(parent, function (entries) {
-            var list = entries.filter(function (e) { return !e.isDir; });
+            var list = inOrder(entries.filter(function (e) { return !e.isDir; }));
             var cur = list.filter(function (e) { return e.file.fullPath === fullPath; })[0];
             if (cur) { App.playlist = list; openVideo(cur, resumeMs); }
             else     { openVideo(pseudo, resumeMs); }

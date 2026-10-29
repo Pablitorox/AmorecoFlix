@@ -249,7 +249,23 @@ var Library = (function () {
     function get(key) { return byKey[key] || null; }
     function ofPath(fullPath) { return get(titleKeyOf(fullPath)); }
 
-    /* episodios em ordem (temporada, episodio/nome) */
+    /* filmes de colecao em ordem de lancamento (ano do TMDB, senao o "(2012)"
+       do nome) - pelo nome, "Jogos Vorazes - Em Chamas" vinha antes de
+       "Jogos Vorazes (2012)". Serve para episodios e entradas de pasta (.name) */
+    function filmYear(key, name) {
+        var f = Meta.film(key, name), m;
+        if (f && f.ano) { return +f.ano; }
+        m = /\(((?:19|20)\d{2})\)/.exec(name);
+        return m ? +m[1] : 9999;
+    }
+    function releaseOrder(key) {
+        return function (a, b) {
+            return (filmYear(key, a.name) - filmYear(key, b.name)) ||
+                   naturalCompare(a.name.toLowerCase(), b.name.toLowerCase());
+        };
+    }
+
+    /* episodios em ordem (temporada, episodio/nome); colecao: por lancamento */
     function episodes(t) {
         var out = [];
         if (!t) { return out; }
@@ -260,6 +276,7 @@ var Library = (function () {
             });
             out = out.concat(eps);
         });
+        if (t.kind === 'colecao') { out.sort(releaseOrder(t.key)); }
         return out;
     }
     function seasonsOf(t) { return t ? t.seasons.filter(function (s) { return s.eps.length; }) : []; }
@@ -367,7 +384,7 @@ var Library = (function () {
 
     return {
         scan: scan, changed: changed, onChange: onChange,
-        all: all, get: get, ofPath: ofPath, episodes: episodes, seasonsOf: seasonsOf,
+        all: all, get: get, ofPath: ofPath, episodes: episodes, seasonsOf: seasonsOf, releaseOrder: releaseOrder,
         displayName: displayName, epTitle: epTitle, epCode: epCode, epDuration: epDuration,
         progressOf: progressOf, nextUp: nextUp,
         ready: function () { return scanned || titles.length > 0; },

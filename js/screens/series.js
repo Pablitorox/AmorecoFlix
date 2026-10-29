@@ -83,7 +83,7 @@ var Series = (function () {
         Art.set(el.img, Meta.backdrop(t.key) || (first ? ThumbsFolder.get(first.name) : null), true);
         el.kicker.textContent = kicker(t, m);
         el.title.textContent = name;
-        el.title.className = 'hero-title' + (name.length > 28 ? ' t-sm' : name.length > 16 ? ' t-md' : '');
+        sizeHeroTitle(el.title, name);
         el.text.textContent = (m && m.sinopse) || '';
         el.text.hidden = !el.text.textContent;
 

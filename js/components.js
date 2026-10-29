@@ -84,6 +84,14 @@ function vScroller(scrollEl, viewH, margin) {
 /* 7 -> "07" */
 function pad2(n) { return (n < 10 ? '0' : '') + n; }
 
+/* titulo grande (Inicio, pagina do titulo), ja com o texto: diminui para nomes
+ * longos. A folga embaixo (.hero-title, pernas do g/j/p) mostraria o topo da 3a
+ * linha num nome que passa de 2 - ai ela sai (.is-cut) */
+function sizeHeroTitle(node, name) {
+    node.className = 'hero-title' + (name.length > 28 ? ' t-sm' : name.length > 16 ? ' t-md' : '');
+    if (node.scrollHeight > node.clientHeight + 1) { node.classList.add('is-cut'); }
+}
+
 /* 754000 ms -> "13 min" / "1 h 32 min" */
 function fmtMinutes(ms) {
     if (!ms || ms <= 0) { return ''; }

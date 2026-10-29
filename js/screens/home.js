@@ -76,11 +76,6 @@ var Home = (function () {
         return parts.join(' · ');
     }
 
-    /* titulo grande: diminui para nomes longos */
-    function sizeTitle(node, name) {
-        node.className = 'hero-title' + (name.length > 28 ? ' t-sm' : name.length > 16 ? ' t-md' : '');
-    }
-
     /* ---------- desenho ---------- */
 
     function renderHero(hero) {
@@ -89,7 +84,7 @@ var Home = (function () {
         if (empty) {
             el.kicker.textContent = Library.scanned() ? 'BIBLIOTECA VAZIA' : 'LENDO O HD…';
             el.title.textContent = 'AmorecoFlix';
-            sizeTitle(el.title, 'AmorecoFlix');
+            sizeHeroTitle(el.title, 'AmorecoFlix');
             el.text.textContent = Library.scanned()
                 ? 'Nenhum vídeo na pasta AmorecoFlix ainda. Use o Importador no PC ou abra as Pastas.'
                 : 'Os seus títulos aparecem aqui em instantes.';
@@ -104,7 +99,7 @@ var Home = (function () {
         Art.set(el.img, (t && Meta.backdrop(t.key)) || ThumbsFolder.get(baseName(hero.path)), true);
         el.kicker.textContent = kickerOf(t);
         el.title.textContent = name;
-        sizeTitle(el.title, name);
+        sizeHeroTitle(el.title, name);
         el.text.textContent = (m && m.sinopse) || '';
         el.text.hidden = !el.text.textContent;
 

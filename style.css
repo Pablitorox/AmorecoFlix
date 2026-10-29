@@ -138,7 +138,11 @@ body.playing .screen {
 .hero-title {
     margin: 0; font-family: var(--font-title); font-weight: 700; font-size: 104px; line-height: 0.98; letter-spacing: -0.03em;
     max-width: 1000px; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+    /* line-height < 1 + overflow: hidden cortava a perna do g/j/p da ultima linha:
+       o padding deixa ela aparecer e a margem negativa devolve o espacamento */
+    padding-bottom: 0.16em; margin-bottom: -0.16em;
 }
+.hero-title.is-cut { padding-bottom: 0; margin-bottom: 0; }   /* passou de 2 linhas: ver sizeHeroTitle */
 .hero-title.t-md { font-size: 80px; }
 .hero-title.t-sm { font-size: 64px; line-height: 1.04; }
 .hero-text {

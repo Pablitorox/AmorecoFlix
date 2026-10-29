@@ -13,6 +13,7 @@
   Find-TmdbMovie 'arquivo.mkv'         -> resultado de /search/movie pelo titulo+ano do nome
   Find-TmdbCollection 'Pasta'          -> resultado de /search/collection ou $null
   (as tres buscas aceitam -NeedPoster: ignora resultado sem poster - scripts de capa)
+  Get-TmdbTitleBackdrop 1234           -> arte 16:9 do filme COM o titulo escrito (pt, senao en) ou $null
   Get-SeasonEpisode 'arquivo' 'pasta'  -> @{ S=n; E=n } (S01E02, 1x02, Episodio 2, "02 Titulo")
   Save-TmdbImage '/caminho.jpg' 'w1280' 'C:\saida.jpg'
 
@@ -188,6 +189,20 @@ function Find-TmdbCollection([string]$folderName, [switch]$NeedPoster) {
         Start-Sleep -Milliseconds 150
     }
     if ($best -and $bestOv -ge 0.5) { return $best }
+    return $null
+}
+
+# arte 16:9 com o nome do filme (miniatura dos cards): no TMDB, fundo com texto
+# leva idioma (iso_639_1) e cena pura vem sem. pt primeiro, depois en; mais votada
+# (empate: mais votos - so a maior resolucao ja escolheu uma sem o titulo visivel).
+function Get-TmdbTitleBackdrop([int]$movieId) {
+    if (-not $movieId) { return $null }
+    $r = Invoke-Tmdb "/movie/$movieId/images" '&include_image_language=pt,en' ''
+    $best = @($r.backdrops) | Where-Object { $_.iso_639_1 -in @('pt', 'en') -and [double]$_.aspect_ratio -gt 1.6 -and [double]$_.aspect_ratio -lt 1.9 } |
+        Sort-Object @{ e = { if ($_.iso_639_1 -eq 'pt') { 0 } else { 1 } } }, @{ e = { [double]$_.vote_average }; Descending = $true },
+                    @{ e = { [int]$_.vote_count }; Descending = $true }, @{ e = { [int]$_.width }; Descending = $true } |
+        Select-Object -First 1
+    if ($best) { return $best.file_path }
     return $null
 }
 

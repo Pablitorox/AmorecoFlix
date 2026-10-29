@@ -1,7 +1,8 @@
 <#
-  posters-filmes.ps1 - baixa o POSTER oficial de cada filme (TMDB) e monta uma
-  miniatura 16:9 (poster nitido no centro + fundo desfocado), salvando em
-  <ThumbsDir>\<nome-do-arquivo-do-filme>.jpg  (substitui o frame do video).
+  posters-filmes.ps1 - miniatura 16:9 de cada filme em
+  <ThumbsDir>\<nome-do-arquivo-do-filme>.jpg  (substitui o frame do video):
+  a arte 16:9 do TMDB com o nome do filme escrito (pt, senao en); filme sem
+  essa arte fica com o poster nitido no centro + fundo desfocado do proprio poster.
 
   Precisa de uma API key gratuita do TMDB:
     themoviedb.org -> Login -> Settings -> API -> "Create" -> API Key (v3 auth)
@@ -39,18 +40,24 @@ foreach ($v in $vids) {
         $miss++; continue
     }
     $tmp = Join-Path $env:TEMP ("poster_" + [guid]::NewGuid().ToString('N') + '.jpg')
-    if (-not (Save-TmdbImage $hit.poster_path 'w500' $tmp)) { $miss++; continue }
-
-    # 16:9 = poster nitido no centro sobre fundo desfocado do proprio poster
-    $fc = '[0:v]scale=854:480:force_original_aspect_ratio=increase,crop=854:480,boxblur=24:4,eq=brightness=-0.12[bg];' +
-          '[0:v]scale=-1:480:force_original_aspect_ratio=decrease[fg];' +
-          '[bg][fg]overlay=(W-w)/2:0'
-    & $ffmpeg -y -i $tmp -filter_complex $fc -frames:v 1 -q:v 3 -- "$out" 2>$null
-    Remove-Item $tmp -ErrorAction SilentlyContinue
+    $bd = Get-TmdbTitleBackdrop $hit.id
+    if ($bd -and (Save-TmdbImage $bd 'w780' $tmp)) {
+        # arte 16:9 com o titulo: so ajusta para 854x480
+        $kind = 'arte 16:9'
+        & $ffmpeg -y -i $tmp -vf 'scale=854:480:force_original_aspect_ratio=increase,crop=854:480' -frames:v 1 -q:v 3 -- "$out" 2>$null
+    } elseif (Save-TmdbImage $hit.poster_path 'w500' $tmp) {
+        # sem arte 16:9: poster nitido no centro sobre fundo desfocado do proprio poster
+        $kind = 'poster + fundo desfocado'
+        $fc = '[0:v]scale=854:480:force_original_aspect_ratio=increase,crop=854:480,boxblur=24:4,eq=brightness=-0.12[bg];' +
+              '[0:v]scale=-1:480:force_original_aspect_ratio=decrease[fg];' +
+              '[bg][fg]overlay=(W-w)/2:0'
+        & $ffmpeg -y -i $tmp -filter_complex $fc -frames:v 1 -q:v 3 -- "$out" 2>$null
+    } else { $miss++; continue }
+    Remove-Item -LiteralPath $tmp -ErrorAction SilentlyContinue
 
     if (Test-Path -LiteralPath $out) {
         $ok++
-        Write-Host ("  OK  {0}  ->  {1} ({2})" -f $v.Name, $hit.title, $hit.release_date)
+        Write-Host ("  OK  {0}  ->  {1} ({2}) [{3}]" -f $v.Name, $hit.title, $hit.release_date, $kind)
     } else { $miss++ }
     Start-Sleep -Milliseconds 200
 }
