@@ -1,8 +1,9 @@
 <#
   posters-filmes.ps1 - miniatura 16:9 de cada filme em
   <ThumbsDir>\<nome-do-arquivo-do-filme>.jpg  (substitui o frame do video):
-  a arte 16:9 do TMDB com o nome do filme escrito (pt, senao en); filme sem
-  essa arte fica com o poster nitido no centro + fundo desfocado do proprio poster.
+  filme de colecao (numa pasta dentro de Filmes) ganha a arte 16:9 do TMDB com o
+  nome do filme escrito (pt, senao en); filme solto - ou sem essa arte - fica com o
+  poster nitido no centro + fundo desfocado do proprio poster.
 
   Precisa de uma API key gratuita do TMDB:
     themoviedb.org -> Login -> Settings -> API -> "Create" -> API Key (v3 auth)
@@ -40,7 +41,8 @@ foreach ($v in $vids) {
         $miss++; continue
     }
     $tmp = Join-Path $env:TEMP ("poster_" + [guid]::NewGuid().ToString('N') + '.jpg')
-    $bd = Get-TmdbTitleBackdrop $hit.id
+    $bd = $null
+    if ($v.DirectoryName.TrimEnd('\') -ine (Resolve-Path -LiteralPath $Root).Path.TrimEnd('\')) { $bd = Get-TmdbTitleBackdrop $hit.id }   # so colecao
     if ($bd -and (Save-TmdbImage $bd 'w780' $tmp)) {
         # arte 16:9 com o titulo: so ajusta para 854x480
         $kind = 'arte 16:9'

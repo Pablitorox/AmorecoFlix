@@ -768,8 +768,8 @@ function Make-Thumb($dstPath, $season, $ep, $preferStill) {
     if (Test-Path -LiteralPath $out) { Log '    miniatura OK' } else { Log '    miniatura falhou' }
 }
 
-# filme: arte 16:9 do TMDB com o nome do filme; sem ela, poster oficial num quadro
-# 16:9 com fundo desfocado - mesmo visual do posters-filmes.ps1
+# filme de colecao: arte 16:9 do TMDB com o nome do filme; solto (ou sem essa arte):
+# poster oficial num quadro 16:9 com fundo desfocado - mesmo visual do posters-filmes.ps1
 function Make-MoviePoster($dstPath, $movie) {
     if (-not $ffmpeg -or -not $movie -or -not $movie.poster_path) { return $false }
     $thumbs = Join-Path $HdRoot 'thumbs'
@@ -777,7 +777,8 @@ function Make-MoviePoster($dstPath, $movie) {
     $out = Join-Path $thumbs ((Split-Path $dstPath -Leaf) + '.jpg')
     if (Test-Path -LiteralPath $out) { Remove-Item -LiteralPath $out -Force }
     $tmp = Join-Path $env:TEMP ('poster_' + [guid]::NewGuid().ToString('N') + '.jpg')
-    $bd = Get-TmdbTitleBackdrop $movie.id
+    $bd = $null
+    if ((Split-Path $dstPath -Parent).TrimEnd('\') -ine (Join-Path $HdRoot 'Filmes').TrimEnd('\')) { $bd = Get-TmdbTitleBackdrop $movie.id }   # so colecao
     if ($bd -and (Save-TmdbImage $bd 'w780' $tmp)) {
         & $ffmpeg -y -i $tmp -vf 'scale=854:480:force_original_aspect_ratio=increase,crop=854:480' -frames:v 1 -q:v 3 -- $out 2>$null
     } else {
